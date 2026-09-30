@@ -1,0 +1,1354 @@
+---
+/**
+ * /perfil/sobre — Sobre: bio + favoritos + recomendações (Etapa 13).
+ * Exige autenticação: deslogado → /entrar?next=%2Fperfil%2Fsobre.
+ * Usa o ProfileShell compartilhado (mesmo hero/avatar/stats/tabs).
+ * Favoritos (até 12) e Recomendo (até 6, com nota 1–500) carregados em
+ * paralelo com o resto; ordem manual por seção (position ASC, backend).
+ * Adicionar via <dialog> de busca (reutiliza /api/search); editar nota,
+ * remover e reordenar sem reload. Nada aqui é público (RLS próprio).
+ */
+import "../../styles/global.css";
+import Layout from "../../layouts/Layout.astro";
+import AppHeader from "../../components/navigation/AppHeader.astro";
+import ProfileShell from "../../components/profile/ProfileShell.astro";
+import PickTemplates from "../../components/profile/PickTemplates.astro";
+import { getDisplayName } from "../../lib/supabase/server";
+import { getUserProfile } from "../../lib/profile/service";
+import { getWatchlistCount } from "../../lib/watchlist/service";
+import { getWatchedCount } from "../../lib/watched/service";
+import { getRatingsCount } from "../../lib/ratings/service";
+import {
+  getFavorites,
+  getRecommendations,
+} from "../../lib/profilePicks/service";
+import {
+  FAVORITE_LIMIT,
+  RECOMMENDATION_LIMIT,
+  RECOMMENDATION_NOTE_MAX,
+} from "../../lib/profilePicks/types";
+import { buildPosterUrl } from "../../lib/tmdb/image";
+
+export const prerender = false;
+
+// UMA sessão validada (1 auth.getUser) compartilhada — mesmo padrão das
+// outras abas do perfil.
+const { supabase, user, profile } = await getUserProfile(Astro.request, Astro.cookies);
+
+if (!user) {
+  return Astro.redirect("/entrar?next=%2Fperfil%2Fsobre", 303);
+}
+
+const ctx = { supabase, user };
+const displayName = profile?.displayName?.trim()
+  ? (profile.displayName as string)
+  : getDisplayName(user);
+const bio = profile?.bio?.trim() ? (profile.bio as string) : null;
+
+// Cargas independentes em paralelo (tabela nova degrada sozinha para []).
+function settledValue<T>(res: PromiseSettledResult<T>, fallback: T): T {
+  return res.status === "fulfilled" ? res.value : fallback;
+}
+
+const [watchlistCountRes, watchedCountRes, ratingsCountRes, favRes, recRes] =
+  await Promise.allSettled([
+    getWatchlistCount(ctx),
+    getWatchedCount(ctx),
+    getRatingsCount(ctx),
+    getFavorites(ctx),
+    getRecommendations(ctx),
+  ]);
+
+const watchlistCount: number | null = settledValue(watchlistCountRes, null);
+const watchedCount: number | null = settledValue(watchedCountRes, null);
+const ratingsCount: number | null = settledValue(ratingsCountRes, null);
+
+const favorites: Awaited<ReturnType<typeof getFavorites>> = settledValue(favRes, []);
+const recommendations: Awaited<ReturnType<typeof getRecommendations>> = settledValue(recRes, []);
+const picksFailed = favRes.status === "rejected" || recRes.status === "rejected";
+
+function typeLabel(mediaType: string): string {
+  return mediaType === "tv" ? "Série" : "Filme";
+}
+---
+
+<Layout title="Sobre — CineVee" description="Sua bio, seus favoritos e o que você recomenda." noindex>
+  <AppHeader />
+  <main>
+    <ProfileShell
+      displayName={displayName}
+      username={profile?.username ?? null}
+      bio={profile?.bio ?? null}
+      avatarUrl={profile?.avatarUrl ?? null}
+      watchlistCount={watchlistCount}
+      watchedCount={watchedCount}
+      ratingsCount={ratingsCount}
+      activeTab="about"
+    >
+      <h2 class="mt-10 text-xl font-bold tracking-tight">Sobre você</h2>
+      {
+        bio ? (
+          <>
+            <p class="cinevee-review-text mt-2 max-w-prose text-pretty text-sm leading-6 text-base-content/80 sm:text-base">
+              {bio}
+            </p>
+            <p class="mt-3">
+              <a
+                href="/perfil/editar#identity-bio"
+                class="btn btn-outline min-h-12 rounded-full px-6 text-sm font-semibold"
+              >
+                Editar bio
+              </a>
+            </p>
+          </>
+        ) : (
+          <div class="mt-4 rounded-3xl border border-base-300 bg-base-200/40 px-6 py-8 text-center">
+            <p class="text-base font-semibold">Conte um pouco sobre você.</p>
+            <p class="mx-auto mt-1 max-w-[40ch] text-sm text-base-content/60">
+              Uma bio curta ajuda a dar contexto aos seus favoritos e recomendações.
+            </p>
+            <p class="mt-4">
+              <a
+                href="/perfil/editar#identity-bio"
+                class="btn btn-primary min-h-12 rounded-full px-8"
+              >
+                Adicionar bio
+              </a>
+            </p>
+          </div>
+        )
+      }
+
+      {
+        picksFailed && (
+          <div role="alert" class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm">
+            Não foi possível carregar seus favoritos e recomendações agora. Tente novamente em instantes.
+          </div>
+        )
+      }
+
+      {/* Meus favoritos */}
+      <section aria-labelledby="about-favorites-title" class="mt-10" data-picks-section="favorite" data-limit={FAVORITE_LIMIT}>
+        <div class="flex min-h-12 flex-wrap items-center justify-between gap-2">
+          <h2 id="about-favorites-title" class="text-xl font-bold tracking-tight">
+            Meus favoritos{" "}
+            <span data-picks-count class="ml-1 align-middle text-sm font-semibold tabular-nums text-base-content/50">
+              {favorites.length} / {FAVORITE_LIMIT}
+            </span>
+          </h2>
+          <button
+            type="button"
+            data-picks-add
+            data-locked={picksFailed || undefined}
+            disabled={picksFailed || favorites.length >= FAVORITE_LIMIT}
+            class="btn btn-outline min-h-12 rounded-full px-5 text-sm font-semibold disabled:opacity-40"
+          >
+            + Adicionar favorito
+          </button>
+        </div>
+        <p class="mt-1 text-sm text-base-content/60">
+          Os títulos que representam o seu gosto.
+        </p>
+        <p data-limit-hint style={favorites.length >= FAVORITE_LIMIT ? undefined : "display: none"} class="mt-2 text-sm text-base-content/60">
+          Você já escolheu {FAVORITE_LIMIT} favoritos. Remova um para adicionar outro.
+        </p>
+
+        <div
+          data-picks-empty
+          style={favorites.length > 0 ? "display: none" : undefined}
+          class="mt-4 rounded-3xl border border-base-300 bg-base-200/40 px-6 py-8 text-center"
+        >
+          <p class="text-base font-semibold">Quais títulos representam o seu gosto?</p>
+          <p class="mx-auto mt-1 max-w-[40ch] text-sm text-base-content/60">
+            Escolha até {FAVORITE_LIMIT} filmes ou séries.
+          </p>
+        </div>
+
+        <p
+          data-picks-status
+          role="status"
+          aria-live="polite"
+          style="display: none"
+          class="mt-4 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm"
+        />
+
+        <ul
+          data-picks-list
+          aria-label="Meus favoritos"
+          class="mt-4 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+        >
+          {
+            favorites.map((item, index) => {
+              const posterUrl = buildPosterUrl(item.posterPath);
+              const label = typeLabel(item.mediaType);
+              const meta = item.year ? `${item.year} · ${label}` : label;
+              return (
+                <li
+                  data-pick-card
+                  data-kind="favorite"
+                  data-pick-id={item.id}
+                  data-tmdb-id={item.tmdbId}
+                  data-media-type={item.mediaType}
+                  data-position={item.position}
+                >
+                  <article class="relative">
+                    <a
+                      data-role="link"
+                      href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                      class="cinevee-card group block rounded-xl"
+                      aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                    >
+                      {
+                        posterUrl ? (
+                          <img
+                            data-role="poster"
+                            src={posterUrl}
+                            alt={`Pôster de ${item.title}`}
+                            width="500"
+                            height="750"
+                            loading="lazy"
+                            class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                          />
+                        ) : (
+                          <div data-role="placeholder" class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                            <svg
+                              aria-hidden="true"
+                              class="h-10 w-10 text-white/25"
+                              viewBox="0 0 24 24"
+                              fill="currentColor"
+                            >
+                              <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                            </svg>
+                          </div>
+                        )
+                      }
+                      <p data-role="title" class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                        {item.title}
+                      </p>
+                      <p data-role="meta" class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                        {meta}
+                      </p>
+                    </a>
+                    <button
+                      type="button"
+                      data-pick-remove
+                      aria-label={`Remover ${item.title} dos favoritos`}
+                      class="absolute right-1.5 top-1.5 flex min-h-12 min-w-12 items-center justify-center rounded-full border border-white/15 bg-black/55 text-red-300/90 backdrop-blur-sm transition-colors duration-200 hover:border-red-800/50 hover:bg-red-950/70 hover:text-red-200"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M4 7h16" />
+                        <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                        <path d="M6.5 7l1 13h9l1-13" />
+                      </svg>
+                    </button>
+                    <div class="mt-1 flex items-center gap-1">
+                      <button
+                        type="button"
+                        data-pick-up
+                        aria-label={`Mover ${item.title} para cima`}
+                        disabled={index === 0}
+                        class="btn btn-ghost btn-sm min-h-12 min-w-12 rounded-xl px-2 disabled:opacity-30"
+                      >
+                        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m18 15-6-6-6 6" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        data-pick-down
+                        aria-label={`Mover ${item.title} para baixo`}
+                        disabled={index === favorites.length - 1}
+                        class="btn btn-ghost btn-sm min-h-12 min-w-12 rounded-xl px-2 disabled:opacity-30"
+                      >
+                        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                    </div>
+                  </article>
+                </li>
+              );
+            })
+          }
+        </ul>
+      </section>
+
+      {/* Recomendo */}
+      <section aria-labelledby="about-recs-title" class="mt-10" data-picks-section="recommendation" data-limit={RECOMMENDATION_LIMIT}>
+        <div class="flex min-h-12 flex-wrap items-center justify-between gap-2">
+          <h2 id="about-recs-title" class="text-xl font-bold tracking-tight">
+            Recomendo{" "}
+            <span data-picks-count class="ml-1 align-middle text-sm font-semibold tabular-nums text-base-content/50">
+              {recommendations.length} / {RECOMMENDATION_LIMIT}
+            </span>
+          </h2>
+          <button
+            type="button"
+            data-picks-add
+            data-locked={picksFailed || undefined}
+            disabled={picksFailed || recommendations.length >= RECOMMENDATION_LIMIT}
+            class="btn btn-outline min-h-12 rounded-full px-5 text-sm font-semibold disabled:opacity-40"
+          >
+            + Adicionar recomendação
+          </button>
+        </div>
+        <p class="mt-1 text-sm text-base-content/60">
+          Títulos que você indica — com o porquê em suas palavras.
+        </p>
+        <p data-limit-hint style={recommendations.length >= RECOMMENDATION_LIMIT ? undefined : "display: none"} class="mt-2 text-sm text-base-content/60">
+          Você já recomendou {RECOMMENDATION_LIMIT} títulos. Remova um para adicionar outro.
+        </p>
+
+        <div
+          data-picks-empty
+          style={recommendations.length > 0 ? "display: none" : undefined}
+          class="mt-4 rounded-3xl border border-base-300 bg-base-200/40 px-6 py-8 text-center"
+        >
+          <p class="text-base font-semibold">Tem algo que você sempre indica para alguém?</p>
+          <p class="mx-auto mt-1 max-w-[40ch] text-sm text-base-content/60">
+            Adicione até {RECOMMENDATION_LIMIT} títulos e conte por que vale assistir.
+          </p>
+        </div>
+
+        <p
+          data-picks-status
+          role="status"
+          aria-live="polite"
+          style="display: none"
+          class="mt-4 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm"
+        />
+
+        <ul data-picks-list aria-label="Suas recomendações" class="mt-4 flex flex-col gap-4">
+          {
+            recommendations.map((item, index) => {
+              const posterUrl = buildPosterUrl(item.posterPath);
+              const label = typeLabel(item.mediaType);
+              const meta = item.year ? `${item.year} · ${label}` : label;
+              return (
+                <li
+                  data-pick-card
+                  data-kind="recommendation"
+                  data-pick-id={item.id}
+                  data-tmdb-id={item.tmdbId}
+                  data-media-type={item.mediaType}
+                  data-position={item.position}
+                >
+                  <article class="flex gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3">
+                    <a
+                      data-role="poster-link"
+                      href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                      class="block w-16 shrink-0 sm:w-20"
+                      tabindex="-1"
+                      aria-hidden="true"
+                    >
+                      {
+                        posterUrl ? (
+                          <img
+                            data-role="poster"
+                            src={posterUrl}
+                            alt=""
+                            width="500"
+                            height="750"
+                            loading="lazy"
+                            class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                          />
+                        ) : (
+                          <div data-role="placeholder" class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                            <svg
+                              aria-hidden="true"
+                              class="h-8 w-8 text-white/25"
+                              viewBox="0 0 24 24"
+                              fill="currentColor"
+                            >
+                              <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                            </svg>
+                          </div>
+                        )
+                      }
+                    </a>
+                    <div class="min-w-0 flex-1">
+                      <a
+                        data-role="title-link"
+                        href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                        class="cinevee-card group inline-block max-w-full rounded-lg"
+                        aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                      >
+                        <p data-role="title" class="truncate text-sm font-semibold leading-snug group-hover:text-primary">
+                          {item.title}
+                        </p>
+                      </a>
+                      <p data-role="meta" class="mt-0.5 text-xs text-base-content/60">
+                        {meta}
+                      </p>
+                      <p data-role="note" class="cinevee-review-text mt-2 text-sm leading-6 text-base-content/80">
+                        {item.note}
+                      </p>
+                      <div class="mt-2 flex flex-wrap items-center gap-1">
+                        <button
+                          type="button"
+                          data-pick-edit-note
+                          aria-label={`Editar recomendação de ${item.title}`}
+                          class="inline-flex min-h-12 items-center rounded-lg px-2 text-xs font-semibold text-base-content/70 underline-offset-4 hover:text-base-content hover:underline"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          data-pick-remove
+                          aria-label={`Remover recomendação de ${item.title}`}
+                          class="inline-flex min-h-12 items-center rounded-lg px-2 text-xs font-medium text-error/80 underline-offset-4 hover:text-error hover:underline"
+                        >
+                          Remover
+                        </button>
+                        <span class="min-w-2 flex-1" aria-hidden="true"></span>
+                        <button
+                          type="button"
+                          data-pick-up
+                          aria-label={`Mover ${item.title} para cima`}
+                          disabled={index === 0}
+                          class="btn btn-ghost btn-sm min-h-12 min-w-12 rounded-xl px-2 disabled:opacity-30"
+                        >
+                          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m18 15-6-6-6 6" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          data-pick-down
+                          aria-label={`Mover ${item.title} para baixo`}
+                          disabled={index === recommendations.length - 1}
+                          class="btn btn-ghost btn-sm min-h-12 min-w-12 rounded-xl px-2 disabled:opacity-30"
+                        >
+                          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                </li>
+              );
+            })
+          }
+        </ul>
+      </section>
+    </ProfileShell>
+  </main>
+</Layout>
+
+{/* Dialog de adicionar: busca compacta (reutiliza /api/search) + nota. */}
+<dialog
+  id="pick-dialog"
+  aria-labelledby="pick-dialog-title"
+  class="w-[min(34rem,calc(100vw-2rem))] rounded-3xl border border-base-300 bg-base-100 p-6 text-base-content"
+>
+  <div class="flex min-h-12 items-start justify-between gap-3">
+    <h2 id="pick-dialog-title" class="text-lg font-bold tracking-tight">Adicionar favorito</h2>
+    <button
+      id="pick-dialog-close"
+      type="button"
+      aria-label="Fechar"
+      class="btn btn-ghost btn-sm min-h-12 min-w-12 shrink-0 rounded-xl px-2"
+    >
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 6 6 18M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <div id="pick-dialog-search">
+    <label for="pick-search-input" class="sr-only">Buscar filme ou série</label>
+    <input
+      id="pick-search-input"
+      type="search"
+      placeholder="Buscar filme ou série..."
+      autocomplete="off"
+      spellcheck="false"
+      enterkeyhint="search"
+      aria-describedby="pick-search-status"
+      class="input input-bordered mt-4 min-h-12 w-full rounded-2xl bg-base-200 px-4 text-base"
+    />
+    <p id="pick-search-status" role="status" class="mt-3 text-sm text-base-content/70">
+      Digite pelo menos 2 caracteres para buscar.
+    </p>
+    <ul id="pick-search-results" aria-label="Resultados da busca" class="mt-2 flex max-h-[40vh] flex-col gap-1 overflow-y-auto">
+    </ul>
+  </div>
+
+  <div id="pick-dialog-note" style="display: none">
+    <p class="mt-4 text-sm text-base-content/60">Recomendando</p>
+    <p id="pick-dialog-selected" class="mt-0.5 truncate text-base font-bold"></p>
+    <label for="pick-note-input" class="mt-4 block text-sm font-semibold">
+      Por que você recomenda?
+    </label>
+    <textarea
+      id="pick-note-input"
+      rows="4"
+      maxlength={RECOMMENDATION_NOTE_MAX}
+      placeholder="Conte por que vale assistir..."
+      class="textarea textarea-bordered mt-2 min-h-28 w-full resize-y text-base leading-6"
+    ></textarea>
+    <div class="mt-1 flex min-h-12 items-center justify-between gap-3">
+      <p id="pick-note-counter" class="text-xs tabular-nums text-base-content/50" aria-live="off">
+        0 / {RECOMMENDATION_NOTE_MAX}
+      </p>
+      <p id="pick-note-status" role="status" aria-live="polite" class="min-h-6 flex-1 text-right text-xs text-base-content/70"></p>
+    </div>
+    <div class="mt-1 flex flex-wrap items-center gap-2">
+      <button
+        id="pick-note-save"
+        type="button"
+        class="btn btn-primary min-h-12 rounded-full px-6 text-sm font-semibold"
+      >
+        Adicionar recomendação
+      </button>
+      <button
+        id="pick-note-back"
+        type="button"
+        class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-6 text-sm"
+      >
+        Voltar
+      </button>
+    </div>
+  </div>
+</dialog>
+
+<PickTemplates />
+
+<style>
+  #pick-dialog {
+    max-height: 85vh;
+  }
+  #pick-dialog::backdrop {
+    background: rgb(0 0 0 / 0.6);
+  }
+</style>
+
+<script>
+  // Sobre: favoritos + recomendações sem reload (vanilla JS, sem frameworks).
+  // - Adicionar via <dialog> com busca compacta (reutiliza /api/search:
+  //   debounce ~300ms, mínimo 2 caracteres, AbortController + sequência
+  //   para ignorar respostas antigas; só movie/tv, sem person).
+  // - Recommendation pede nota (1–500) no segundo passo do dialog.
+  // - Editar nota, remover e reordenar (cima/baixo, teclado + touch)
+  //   via /api/profile/picks. Posições e contadores atualizados no DOM.
+  // - Texto do usuário sempre via textContent/atributos (nunca innerHTML).
+  // - Nenhum user_id sai do browser: o backend deriva tudo da sessão.
+  (function () {
+    var POSTER_BASE = "https://image.tmdb.org/t/p/w500";
+    var DEBOUNCE_MS = 300;
+
+    type PickKind = "favorite" | "recommendation";
+
+    function byId(id: string): HTMLElement | null {
+      return document.getElementById(id);
+    }
+
+    var favSection = document.querySelector('[data-picks-section="favorite"]');
+    var recSection = document.querySelector('[data-picks-section="recommendation"]');
+    if (!(favSection instanceof HTMLElement) || !(recSection instanceof HTMLElement)) return;
+
+    var SECTIONS: Record<PickKind, { root: HTMLElement; doneLabel: string }> = {
+      favorite: { root: favSection, doneLabel: "✓ Favorito" },
+      recommendation: { root: recSection, doneLabel: "✓ Recomendado" },
+    };
+
+    function sectionRoot(kind: PickKind): HTMLElement {
+      return SECTIONS[kind].root;
+    }
+
+    function listEl(kind: PickKind): HTMLElement | null {
+      var found = sectionRoot(kind).querySelector("[data-picks-list]");
+      return found instanceof HTMLElement ? found : null;
+    }
+
+    function cards(kind: PickKind): HTMLElement[] {
+      var list = listEl(kind);
+      if (!(list instanceof HTMLElement)) return [];
+      var out: HTMLElement[] = [];
+      var nodes = list.querySelectorAll("[data-pick-card]");
+      for (var i = 0; i < nodes.length; i++) {
+        var candidate = nodes[i];
+        if (candidate instanceof HTMLElement) out.push(candidate);
+      }
+      return out;
+    }
+
+    function limitOf(kind: PickKind): number {
+      return Number(sectionRoot(kind).getAttribute("data-limit")) || 0;
+    }
+
+    function showStatus(kind: PickKind, message: string): void {
+      var status = sectionRoot(kind).querySelector("[data-picks-status]");
+      if (status instanceof HTMLElement) {
+        status.textContent = message;
+        status.style.display = "";
+      }
+    }
+
+    function hideStatus(kind: PickKind): void {
+      var status = sectionRoot(kind).querySelector("[data-picks-status]");
+      if (status instanceof HTMLElement) status.style.display = "none";
+    }
+
+    function reindex(kind: PickKind): void {
+      var items = cards(kind);
+      for (var i = 0; i < items.length; i++) {
+        items[i].setAttribute("data-position", String(i));
+        var up = items[i].querySelector("[data-pick-up]");
+        var down = items[i].querySelector("[data-pick-down]");
+        if (up instanceof HTMLButtonElement) up.disabled = i === 0;
+        if (down instanceof HTMLButtonElement) down.disabled = i === items.length - 1;
+      }
+    }
+
+    function updateSection(kind: PickKind): void {
+      var items = cards(kind);
+      var n = items.length;
+      var limit = limitOf(kind);
+      var root = sectionRoot(kind);
+
+      var count = root.querySelector("[data-picks-count]");
+      if (count) count.textContent = n + " / " + limit;
+
+      var addBtn = root.querySelector("[data-picks-add]");
+      if (addBtn instanceof HTMLButtonElement) {
+        addBtn.disabled = addBtn.hasAttribute("data-locked") || n >= limit;
+      }
+
+      var hint = root.querySelector("[data-limit-hint]");
+      if (hint instanceof HTMLElement) hint.style.display = n >= limit ? "" : "none";
+
+      var empty = root.querySelector("[data-picks-empty]");
+      if (empty instanceof HTMLElement) empty.style.display = n > 0 ? "none" : "";
+
+      reindex(kind);
+    }
+
+    function cardKey(card: HTMLElement): string {
+      return card.getAttribute("data-media-type") + ":" + card.getAttribute("data-tmdb-id");
+    }
+
+    function currentKeys(kind: PickKind): Record<string, boolean> {
+      var set: Record<string, boolean> = {};
+      var items = cards(kind);
+      for (var i = 0; i < items.length; i++) set[cardKey(items[i])] = true;
+      return set;
+    }
+
+    function typeLabel(type: string): string {
+      return type === "tv" ? "Série" : "Filme";
+    }
+
+    interface CardLike {
+      mediaType?: string;
+      type?: string;
+      year?: number | null;
+      title?: unknown;
+    }
+
+    function metaText(item: CardLike): string {
+      var rawType = typeof item.mediaType === "string" ? item.mediaType : item.type;
+      var label = typeLabel(typeof rawType === "string" ? rawType : "movie");
+      var year = item.year;
+      return year ? year + " · " + label : label;
+    }
+
+    function titleOf(item: { title?: unknown }): string {
+      return typeof item.title === "string" ? item.title : "";
+    }
+
+    interface PickApiItem {
+      id: string;
+      tmdbId: number;
+      mediaType: string;
+      title: string;
+      posterPath?: string | null;
+      year?: number | null;
+      note?: string;
+    }
+
+    interface PickApiJson {
+      item?: PickApiItem;
+      removed?: boolean;
+      ok?: boolean;
+      error?: unknown;
+    }
+
+    interface PickApiOut {
+      status: number;
+      json: PickApiJson | null;
+    }
+
+    async function picksApi(method: string, body: unknown): Promise<PickApiOut> {
+      var response = await fetch("/api/profile/picks", {
+        method: method,
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      var json: PickApiJson | null = null;
+      try {
+        json = await response.json();
+      } catch {
+        json = null;
+      }
+      return { status: response.status, json: json };
+    }
+
+    function apiMessage(out: PickApiOut, fallback: string): string {
+      if (out && out.json && typeof out.json.error === "string" && out.json.error) {
+        return out.json.error;
+      }
+      return fallback;
+    }
+
+    function fillPoster(card: ParentNode, posterPath: string | null, title: string): void {
+      var img = card.querySelector('[data-role="poster"]');
+      var placeholder = card.querySelector('[data-role="placeholder"]');
+      if (posterPath && img instanceof HTMLImageElement) {
+        img.src = POSTER_BASE + posterPath;
+        img.alt = "Pôster de " + title;
+        img.removeAttribute("hidden");
+        if (placeholder instanceof HTMLElement) placeholder.setAttribute("hidden", "");
+      } else {
+        if (img instanceof HTMLImageElement) img.setAttribute("hidden", "");
+        if (placeholder instanceof HTMLElement) placeholder.removeAttribute("hidden");
+      }
+    }
+
+    interface HrefLike {
+      mediaType?: string;
+      type?: string;
+      tmdbId?: number | string;
+      id?: number | string;
+      title?: unknown;
+      year?: number | null;
+    }
+
+    function detailsHref(item: HrefLike): string {
+      var type = typeof item.mediaType === "string" ? item.mediaType : item.type;
+      var id = item.tmdbId != null ? item.tmdbId : item.id;
+      return "/titulo/" + type + "/" + id;
+    }
+
+    function ariaTitle(item: HrefLike): string {
+      var rawType = typeof item.mediaType === "string" ? item.mediaType : item.type;
+      var label = typeLabel(typeof rawType === "string" ? rawType : "movie").toLowerCase();
+      return titleOf(item) + ", " + label + (item.year ? " de " + item.year : "");
+    }
+
+    function buildFavoriteCard(item: PickApiItem): DocumentFragment {
+      var template = byId("favorite-card-template");
+      if (!(template instanceof HTMLTemplateElement)) return document.createDocumentFragment();
+      var node = template.content.cloneNode(true) as DocumentFragment;
+      var li = node.querySelector("[data-pick-card]");
+      if (!(li instanceof HTMLElement)) return node;
+      li.setAttribute("data-pick-id", item.id);
+      li.setAttribute("data-tmdb-id", String(item.tmdbId));
+      li.setAttribute("data-media-type", item.mediaType);
+
+      var link = node.querySelector('[data-role="link"]');
+      if (link instanceof HTMLAnchorElement) {
+        link.href = detailsHref(item);
+        link.setAttribute("aria-label", ariaTitle(item));
+      }
+
+      fillPoster(node, item.posterPath || null, titleOf(item));
+      var titleEl = node.querySelector('[data-role="title"]');
+      if (titleEl) titleEl.textContent = titleOf(item);
+      var metaEl = node.querySelector('[data-role="meta"]');
+      if (metaEl) metaEl.textContent = metaText(item);
+
+      var remove = node.querySelector("[data-pick-remove]");
+      if (remove) remove.setAttribute("aria-label", "Remover " + titleOf(item) + " dos favoritos");
+      var upBtn = node.querySelector("[data-pick-up]");
+      if (upBtn) upBtn.setAttribute("aria-label", "Mover " + titleOf(item) + " para cima");
+      var downBtn = node.querySelector("[data-pick-down]");
+      if (downBtn) downBtn.setAttribute("aria-label", "Mover " + titleOf(item) + " para baixo");
+      return node;
+    }
+
+    function buildRecommendationRow(item: PickApiItem): DocumentFragment {
+      var template = byId("recommendation-row-template");
+      if (!(template instanceof HTMLTemplateElement)) return document.createDocumentFragment();
+      var node = template.content.cloneNode(true) as DocumentFragment;
+      var li = node.querySelector("[data-pick-card]");
+      if (!(li instanceof HTMLElement)) return node;
+      li.setAttribute("data-pick-id", item.id);
+      li.setAttribute("data-tmdb-id", String(item.tmdbId));
+      li.setAttribute("data-media-type", item.mediaType);
+
+      var posterLink = node.querySelector('[data-role="poster-link"]');
+      if (posterLink instanceof HTMLAnchorElement) posterLink.href = detailsHref(item);
+      var titleLink = node.querySelector('[data-role="title-link"]');
+      if (titleLink instanceof HTMLAnchorElement) {
+        titleLink.href = detailsHref(item);
+        titleLink.setAttribute("aria-label", ariaTitle(item));
+      }
+
+      fillPoster(node, item.posterPath || null, titleOf(item));
+      var titleEl = node.querySelector('[data-role="title"]');
+      if (titleEl) titleEl.textContent = titleOf(item);
+      var metaEl = node.querySelector('[data-role="meta"]');
+      if (metaEl) metaEl.textContent = metaText(item);
+      var noteEl = node.querySelector('[data-role="note"]');
+      if (noteEl) noteEl.textContent = typeof item.note === "string" ? item.note : "";
+
+      var editBtn = node.querySelector("[data-pick-edit-note]");
+      if (editBtn) editBtn.setAttribute("aria-label", "Editar recomendação de " + titleOf(item));
+      var removeBtn = node.querySelector("[data-pick-remove]");
+      if (removeBtn) removeBtn.setAttribute("aria-label", "Remover recomendação de " + titleOf(item));
+      var upBtn = node.querySelector("[data-pick-up]");
+      if (upBtn) upBtn.setAttribute("aria-label", "Mover " + titleOf(item) + " para cima");
+      var downBtn = node.querySelector("[data-pick-down]");
+      if (downBtn) downBtn.setAttribute("aria-label", "Mover " + titleOf(item) + " para baixo");
+      return node;
+    }
+
+    function findCardByPickId(kind: PickKind, pickId: string | null): HTMLElement | null {
+      var items = cards(kind);
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].getAttribute("data-pick-id") === pickId) return items[i];
+      }
+      return null;
+    }
+
+    // ---- Remover (só aquele kind; sem reload)
+    function onRemove(button: HTMLButtonElement, kind: PickKind): void {
+      var card = button.closest("[data-pick-card]");
+      if (!(card instanceof HTMLElement)) return;
+      const cardEl: HTMLElement = card;
+      var pickId = cardEl.getAttribute("data-pick-id");
+      button.setAttribute("disabled", "");
+      hideStatus(kind);
+      picksApi("DELETE", { id: pickId })
+        .then(function (out) {
+          if (out.status === 200 && out.json && out.json.removed) {
+            cardEl.remove();
+            updateSection(kind);
+            return;
+          }
+          button.removeAttribute("disabled");
+          showStatus(kind, apiMessage(out, "Não foi possível remover sua seleção."));
+        })
+        .catch(function () {
+          button.removeAttribute("disabled");
+          showStatus(kind, "Não foi possível remover sua seleção.");
+        });
+    }
+
+    // ---- Reordenar (cima/baixo; otimista com reversão em falha)
+    function onMove(button: HTMLButtonElement, kind: PickKind, direction: number): void {
+      var card = button.closest("[data-pick-card]");
+      if (!(card instanceof HTMLElement)) return;
+      var list = card.parentNode;
+      if (!(list instanceof HTMLElement)) return;
+      var sibling =
+        direction < 0 ? card.previousElementSibling : card.nextElementSibling;
+      if (!(sibling instanceof HTMLElement)) return;
+
+      var cardNode: HTMLElement = card;
+      var listNode: HTMLElement = list;
+      var siblingNode: HTMLElement = sibling;
+
+      if (direction < 0) listNode.insertBefore(cardNode, siblingNode);
+      else listNode.insertBefore(siblingNode, cardNode);
+      reindex(kind);
+      hideStatus(kind);
+
+      var ids = cards(kind).map(function (node: HTMLElement): string | null {
+        return node.getAttribute("data-pick-id");
+      });
+
+      function revert(): void {
+        if (direction < 0) listNode.insertBefore(siblingNode, cardNode);
+        else listNode.insertBefore(cardNode, siblingNode);
+        reindex(kind);
+      }
+
+      picksApi("PATCH", { op: "reorder", kind: kind, orderedIds: ids })
+        .then(function (out) {
+          if (!(out.status === 200 && out.json && out.json.ok)) {
+            revert();
+            showStatus(kind, apiMessage(out, "Não foi possível reordenar sua lista."));
+          }
+        })
+        .catch(function () {
+          revert();
+          showStatus(kind, "Não foi possível reordenar sua lista.");
+        });
+    }
+
+    // ---- Dialog: busca + nota
+    const dialog = byId("pick-dialog") as HTMLDialogElement;
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    const dialogTitle = byId("pick-dialog-title") as HTMLElement;
+    if (!(dialogTitle instanceof HTMLElement)) return;
+    const dialogClose = byId("pick-dialog-close") as HTMLButtonElement;
+    if (!(dialogClose instanceof HTMLButtonElement)) return;
+    const searchStep = byId("pick-dialog-search") as HTMLElement;
+    if (!(searchStep instanceof HTMLElement)) return;
+    const searchInput = byId("pick-search-input") as HTMLInputElement;
+    if (!(searchInput instanceof HTMLInputElement)) return;
+    const searchStatus = byId("pick-search-status") as HTMLElement;
+    if (!(searchStatus instanceof HTMLElement)) return;
+    const searchResults = byId("pick-search-results") as HTMLElement;
+    if (!(searchResults instanceof HTMLElement)) return;
+    const noteStep = byId("pick-dialog-note") as HTMLElement;
+    if (!(noteStep instanceof HTMLElement)) return;
+    const selectedLine = byId("pick-dialog-selected") as HTMLElement;
+    if (!(selectedLine instanceof HTMLElement)) return;
+    const noteInput = byId("pick-note-input") as HTMLTextAreaElement;
+    if (!(noteInput instanceof HTMLTextAreaElement)) return;
+    const noteCounter = byId("pick-note-counter") as HTMLElement;
+    if (!(noteCounter instanceof HTMLElement)) return;
+    const noteStatus = byId("pick-note-status") as HTMLElement;
+    if (!(noteStatus instanceof HTMLElement)) return;
+    const noteSave = byId("pick-note-save") as HTMLButtonElement;
+    if (!(noteSave instanceof HTMLButtonElement)) return;
+    const noteBack = byId("pick-note-back") as HTMLButtonElement;
+    if (!(noteBack instanceof HTMLButtonElement)) return;
+
+    interface SearchItem {
+      id: number;
+      type: "movie" | "tv";
+      title: string;
+      year?: number;
+      posterUrl?: string;
+    }
+
+    var currentKind: PickKind = "favorite";
+    var currentMode: "add" | "edit" = "add";
+    var selectedItem: SearchItem | null = null;
+    var editingId: string | null = null;
+    var opener: HTMLElement | null = null;
+    var searchTimer: ReturnType<typeof setTimeout> | null = null;
+    var aborter: AbortController | null = null;
+    var requestSeq = 0;
+    var lastQuery = "";
+    var lastResults: SearchItem[] = [];
+
+    function showSearchStep(): void {
+      searchStep.style.display = "";
+      noteStep.style.display = "none";
+    }
+
+    function showNoteStep(): void {
+      searchStep.style.display = "none";
+      noteStep.style.display = "";
+    }
+
+    function clearResults(): void {
+      while (searchResults.firstChild) searchResults.removeChild(searchResults.firstChild);
+    }
+
+    function openDialog(): void {
+      if (!(dialog instanceof HTMLDialogElement)) return;
+      try {
+        if (!dialog.open) dialog.showModal();
+      } catch {
+        return;
+      }
+    }
+
+    function openAdd(kind: PickKind, openerBtn: HTMLButtonElement | null): void {
+      currentKind = kind;
+      currentMode = "add";
+      selectedItem = null;
+      editingId = null;
+      opener = openerBtn || null;
+      dialogTitle.textContent = kind === "favorite" ? "Adicionar favorito" : "Adicionar recomendação";
+      searchInput.value = "";
+      clearResults();
+      searchStatus.textContent = "Digite pelo menos 2 caracteres para buscar.";
+      showSearchStep();
+      openDialog();
+      searchInput.focus();
+    }
+
+    function openEditNote(card: HTMLElement): void {
+      currentKind = "recommendation";
+      currentMode = "edit";
+      selectedItem = null;
+      editingId = card.getAttribute("data-pick-id");
+      opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      var titleNode = card.querySelector('[data-role="title"]');
+      var noteNode = card.querySelector('[data-role="note"]');
+      dialogTitle.textContent = "Editar recomendação";
+      selectedLine.textContent = titleNode ? titleNode.textContent || "" : "";
+      noteInput.value = noteNode ? noteNode.textContent || "" : "";
+      paintNoteCounter();
+      setNoteStatus("");
+      noteSave.textContent = "Salvar alterações";
+      showNoteStep();
+      openDialog();
+      noteInput.focus();
+    }
+
+    function selectForNote(item: SearchItem): void {
+      currentMode = "add";
+      selectedItem = item;
+      editingId = null;
+      selectedLine.textContent = titleOf(item);
+      noteInput.value = "";
+      paintNoteCounter();
+      setNoteStatus("");
+      noteSave.textContent = "Adicionar recomendação";
+      showNoteStep();
+      noteInput.focus();
+    }
+
+    function paintNoteCounter(): void {
+      var max = noteInput.maxLength > 0 ? noteInput.maxLength : 500;
+      noteCounter.textContent = noteInput.value.length + " / " + max;
+    }
+
+    function setNoteStatus(message: string): void {
+      noteStatus.textContent = message;
+    }
+
+    function isValidSearchItem(item: unknown): item is SearchItem {
+      if (typeof item !== "object" || item === null) return false;
+      var candidate = item as Record<string, unknown>;
+      return (
+        typeof candidate["id"] === "number" &&
+        (candidate["type"] === "movie" || candidate["type"] === "tv") &&
+        typeof candidate["title"] === "string" &&
+        (candidate["title"] as string).length > 0
+      );
+    }
+
+    function renderResults(query: string, results: unknown[]): void {
+      clearResults();
+      lastQuery = query;
+      lastResults = results.filter(isValidSearchItem);
+
+      if (lastResults.length === 0) {
+        searchStatus.textContent = 'Nenhum título encontrado para "' + query + '".';
+        return;
+      }
+      searchStatus.textContent =
+        lastResults.length === 1
+          ? '1 resultado para "' + query + '".'
+          : lastResults.length + ' resultados para "' + query + '".';
+
+      var template = byId("pick-search-result-template");
+      if (!(template instanceof HTMLTemplateElement)) return;
+      var keys = currentKeys(currentKind);
+
+      for (var i = 0; i < lastResults.length; i++) {
+        (function (item: SearchItem, index: number): void {
+          var node = template.content.cloneNode(true) as DocumentFragment;
+          var key = item.type + ":" + item.id;
+
+          if (item.posterUrl) {
+            var img = node.querySelector('[data-role="img"]');
+            if (img instanceof HTMLImageElement) {
+              img.src = item.posterUrl;
+              img.alt = "Pôster de " + item.title;
+              img.removeAttribute("hidden");
+            }
+          }
+          var titleEl = node.querySelector('[data-role="title"]');
+          if (titleEl) titleEl.textContent = item.title;
+          var meta = item.year ? item.year + " · " + typeLabel(item.type) : typeLabel(item.type);
+          var metaEl = node.querySelector('[data-role="meta"]');
+          if (metaEl) metaEl.textContent = meta;
+
+          var action = node.querySelector('[data-role="action"]');
+          if (!(action instanceof HTMLButtonElement)) {
+            searchResults.appendChild(node);
+            return;
+          }
+          const actionBtn: HTMLButtonElement = action;
+          if (keys[key]) {
+            actionBtn.setAttribute("disabled", "");
+            actionBtn.classList.remove("btn-primary");
+            actionBtn.classList.add("btn-ghost");
+            actionBtn.textContent = SECTIONS[currentKind].doneLabel;
+          } else {
+            actionBtn.textContent = currentKind === "favorite" ? "Adicionar" : "Selecionar";
+            actionBtn.addEventListener("click", function (): void {
+              if (currentKind === "favorite") addFavorite(item, actionBtn);
+              else selectForNote(item);
+            });
+          }
+          void index;
+          searchResults.appendChild(node);
+        })(lastResults[i], i);
+      }
+    }
+
+    function renderLoading(): void {
+      clearResults();
+      searchStatus.textContent = "Buscando...";
+    }
+
+    function renderSearchError(): void {
+      clearResults();
+      searchStatus.textContent = "Não foi possível buscar agora. Tente de novo.";
+    }
+
+    function executeSearch(query: string): void {
+      if (aborter) aborter.abort();
+      aborter = new AbortController();
+      var mySeq = (requestSeq += 1);
+      renderLoading();
+
+      fetch("/api/search?q=" + encodeURIComponent(query), { signal: aborter.signal })
+        .then(function (response) {
+          if (mySeq !== requestSeq) return null;
+          if (!response.ok) {
+            renderSearchError();
+            return null;
+          }
+          return response.json();
+        })
+        .then(function (data) {
+          if (!data || mySeq !== requestSeq) return;
+          renderResults(query, Array.isArray(data.results) ? data.results : []);
+        })
+        .catch(function (error) {
+          if ((error && error.name === "AbortError") || mySeq !== requestSeq) return;
+          renderSearchError();
+        });
+    }
+
+    function scheduleSearch(): void {
+      if (searchTimer) clearTimeout(searchTimer);
+      var query = searchInput.value.trim();
+      if (query.length < 2) {
+        if (aborter) aborter.abort();
+        requestSeq += 1;
+        lastQuery = "";
+        lastResults = [];
+        clearResults();
+        searchStatus.textContent = "Digite pelo menos 2 caracteres para buscar.";
+        return;
+      }
+      searchTimer = setTimeout(function () {
+        executeSearch(query);
+      }, DEBOUNCE_MS);
+    }
+
+    function addFavorite(item: SearchItem, button: HTMLButtonElement): void {
+      button.setAttribute("disabled", "");
+      var original = button.textContent;
+      button.textContent = "Adicionando…";
+      picksApi("POST", { tmdbId: item.id, mediaType: item.type, kind: "favorite" })
+        .then(function (out) {
+          if (out.status === 200 && out.json && out.json.item) {
+            var favList = listEl("favorite");
+            if (favList) {
+              favList.appendChild(
+                buildFavoriteCard({
+                  id: out.json.item.id,
+                  tmdbId: out.json.item.tmdbId,
+                  mediaType: out.json.item.mediaType,
+                  title: out.json.item.title,
+                  posterPath: out.json.item.posterPath,
+                  year: out.json.item.year,
+                }),
+              );
+            }
+            updateSection("favorite");
+            hideStatus("favorite");
+            button.classList.remove("btn-primary");
+            button.classList.add("btn-ghost");
+            button.textContent = SECTIONS.favorite.doneLabel;
+            return;
+          }
+          button.removeAttribute("disabled");
+          button.textContent = original;
+          searchStatus.textContent = apiMessage(out, "Não foi possível adicionar aos favoritos.");
+        })
+        .catch(function () {
+          button.removeAttribute("disabled");
+          button.textContent = original;
+          searchStatus.textContent = "Não foi possível adicionar aos favoritos.";
+        });
+    }
+
+    function saveNote(): void {
+      var raw = noteInput.value;
+      if (raw.trim().length === 0) {
+        setNoteStatus("Conte por que você recomenda este título.");
+        noteInput.focus();
+        return;
+      }
+      if (raw.trim().length > 500) {
+        setNoteStatus("Sua recomendação deve ter no máximo 500 caracteres.");
+        return;
+      }
+      noteSave.setAttribute("disabled", "");
+      var original = noteSave.textContent;
+      noteSave.textContent = "Salvando…";
+      setNoteStatus("");
+
+      function done(): void {
+        noteSave.removeAttribute("disabled");
+        noteSave.textContent = original;
+      }
+
+      if (currentMode === "edit" && editingId) {
+        picksApi("PATCH", { op: "note", id: editingId, note: raw })
+          .then(function (out) {
+            done();
+            if (out.status === 200 && out.json && out.json.item) {
+              var card = findCardByPickId("recommendation", editingId);
+              if (card) {
+                var noteNode = card.querySelector('[data-role="note"]');
+                if (noteNode) noteNode.textContent = out.json.item.note || "";
+              }
+              hideStatus("recommendation");
+              if (!(dialog instanceof HTMLDialogElement)) return;
+              dialog.close();
+              return;
+            }
+            setNoteStatus(apiMessage(out, "Não foi possível salvar sua recomendação."));
+          })
+          .catch(function () {
+            done();
+            setNoteStatus("Não foi possível salvar sua recomendação.");
+          });
+        return;
+      }
+
+      if (!selectedItem) {
+        done();
+        return;
+      }
+      picksApi("POST", {
+        tmdbId: selectedItem.id,
+        mediaType: selectedItem.type,
+        kind: "recommendation",
+        note: raw,
+      })
+        .then(function (out) {
+          done();
+          if (out.status === 200 && out.json && out.json.item) {
+            var recList = listEl("recommendation");
+            if (recList) {
+              recList.appendChild(
+                buildRecommendationRow({
+                  id: out.json.item.id,
+                  tmdbId: out.json.item.tmdbId,
+                  mediaType: out.json.item.mediaType,
+                  title: out.json.item.title,
+                  posterPath: out.json.item.posterPath,
+                  year: out.json.item.year,
+                  note: out.json.item.note,
+                }),
+              );
+            }
+            updateSection("recommendation");
+            hideStatus("recommendation");
+            // Volta à busca e marca o item como adicionado.
+            showSearchStep();
+            renderResults(lastQuery, lastResults);
+            return;
+          }
+          setNoteStatus(apiMessage(out, "Não foi possível adicionar sua recomendação."));
+        })
+        .catch(function () {
+          done();
+          setNoteStatus("Não foi possível adicionar sua recomendação.");
+        });
+    }
+
+    // ---- Ligações
+    favSection.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof Element)) return;
+      var add = target.closest("[data-picks-add]");
+      if (add instanceof HTMLButtonElement && !add.disabled) {
+        openAdd("favorite", add);
+        return;
+      }
+      var remove = target.closest("[data-pick-remove]");
+      if (remove instanceof HTMLButtonElement) {
+        onRemove(remove, "favorite");
+        return;
+      }
+      var up = target.closest("[data-pick-up]");
+      if (up instanceof HTMLButtonElement && !up.disabled) {
+        onMove(up, "favorite", -1);
+        return;
+      }
+      var down = target.closest("[data-pick-down]");
+      if (down instanceof HTMLButtonElement && !down.disabled) {
+        onMove(down, "favorite", 1);
+      }
+    });
+
+    recSection.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof Element)) return;
+      var add = target.closest("[data-picks-add]");
+      if (add instanceof HTMLButtonElement && !add.disabled) {
+        openAdd("recommendation", add);
+        return;
+      }
+      var edit = target.closest("[data-pick-edit-note]");
+      if (edit instanceof HTMLButtonElement) {
+        var card = edit.closest("[data-pick-card]");
+        if (card instanceof HTMLElement) openEditNote(card);
+        return;
+      }
+      var remove = target.closest("[data-pick-remove]");
+      if (remove instanceof HTMLButtonElement) {
+        onRemove(remove, "recommendation");
+        return;
+      }
+      var up = target.closest("[data-pick-up]");
+      if (up instanceof HTMLButtonElement && !up.disabled) {
+        onMove(up, "recommendation", -1);
+        return;
+      }
+      var down = target.closest("[data-pick-down]");
+      if (down instanceof HTMLButtonElement && !down.disabled) {
+        onMove(down, "recommendation", 1);
+      }
+    });
+
+    searchInput.addEventListener("input", scheduleSearch);
+    noteInput.addEventListener("input", paintNoteCounter);
+    noteSave.addEventListener("click", saveNote);
+    noteBack.addEventListener("click", function () {
+      showSearchStep();
+      searchInput.focus();
+    });
+    dialogClose.addEventListener("click", function (): void {
+      if (!(dialog instanceof HTMLDialogElement)) return;
+      dialog.close();
+    });
+    dialog.addEventListener("click", function (event): void {
+      if (event.target === dialog) {
+        if (!(dialog instanceof HTMLDialogElement)) return;
+        dialog.close();
+      }
+    });
+    dialog.addEventListener("close", function () {
+      if (searchTimer) clearTimeout(searchTimer);
+      if (aborter) aborter.abort();
+      requestSeq += 1;
+      if (opener instanceof HTMLElement) opener.focus();
+      opener = null;
+    });
+
+    // Estado inicial: contadores, limites e ordem dos botões.
+    updateSection("favorite");
+    updateSection("recommendation");
+  })();
+</script>

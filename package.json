@@ -1,0 +1,55 @@
+{
+  "name": "cinevee",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "start": "node ./dist/server/entry.mjs",
+    "check": "astro check",
+    "preview": "astro preview",
+    "verify:polish": "node scripts/verify-polish.mjs",
+    "verify:rls": "node --env-file=.env scripts/verify-rls.mjs",
+    "verify:watchlist": "node --env-file=.env scripts/verify-watchlist.mjs",
+    "verify:profile": "node --env-file=.env scripts/verify-profile.mjs",
+    "verify:watched": "node --env-file=.env scripts/verify-watched.mjs",
+    "verify:ratings": "node --env-file=.env scripts/verify-ratings.mjs",
+    "verify:reviews": "node --env-file=.env scripts/verify-reviews.mjs",
+    "verify:personalization": "node --env-file=.env scripts/verify-personalization.mjs",
+    "verify:recommendation-actions": "node --env-file=.env scripts/verify-recommendation-actions.mjs",
+    "verify:explore": "node --env-file=.env scripts/verify-explore.mjs",
+    "verify:user-search": "node --env-file=.env scripts/verify-user-search.mjs",
+    "verify:public-profiles": "node --env-file=.env scripts/verify-public-profiles.mjs",
+    "verify:profile-picks": "node --env-file=.env scripts/verify-profile-picks.mjs",
+    "verify:follows": "node --env-file=.env scripts/verify-follows.mjs",
+    "verify:following-feed": "node --env-file=.env scripts/verify-following-feed.mjs",
+    "verify:rating-likes": "node --env-file=.env scripts/verify-rating-likes.mjs",
+    "verify:rating-comments": "node --env-file=.env scripts/verify-rating-comments.mjs",
+    "verify:notifications": "node --env-file=.env scripts/verify-notifications.mjs",
+    "verify:comment-replies": "node --env-file=.env scripts/verify-comment-replies.mjs",
+    "verify:blocks": "node --env-file=.env scripts/verify-blocks.mjs",
+    "verify:production": "node --env-file=.env scripts/verify-production.mjs",
+    "verify:e2e": "node --env-file=.env scripts/verify-e2e.mjs",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.1.5",
+    "@google/genai": "^2.21.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.3.2",
+    "tailwindcss": "^4.3.3"
+  },
+  "allowScripts": {
+    "esbuild": true
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "daisyui": "^5.7.28",
+    "typescript": "^5.9.3"
+  }
+}

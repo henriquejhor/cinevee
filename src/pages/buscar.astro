@@ -1,0 +1,830 @@
+---
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+import SearchResultCard from "../components/search/SearchResultCard.astro";
+
+// Shell estático (prerender em build time): a busca executa no navegador
+// contra a rota interna /api/search, que fala com o TMDB server-side.
+export const prerender = true;
+---
+
+<Layout
+  title="Buscar — CineVee"
+  description="Busque filmes, séries e pessoas no CineVee."
+  noindex
+>
+  <AppHeader />
+  <main class="mx-auto w-full max-w-3xl px-4 pb-32 pt-6 sm:px-6 sm:pt-8">
+    <h1 class="text-2xl font-bold tracking-tight">Buscar</h1>
+
+    <div role="tablist" aria-label="Tipo de busca" class="mt-4 grid grid-cols-2 gap-1 rounded-2xl border border-base-300 bg-base-200/60 p-1">
+      <button
+        id="tab-titulos"
+        type="button"
+        role="tab"
+        aria-selected="true"
+        aria-controls="panel-titulos"
+        class="min-h-12 rounded-xl text-sm font-semibold transition-colors"
+      >
+        Títulos
+      </button>
+      <button
+        id="tab-pessoas"
+        type="button"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-pessoas"
+        tabindex="-1"
+        class="min-h-12 rounded-xl text-sm font-semibold transition-colors"
+      >
+        Pessoas
+      </button>
+    </div>
+
+    <section id="panel-titulos" role="tabpanel" aria-labelledby="tab-titulos">
+    <form id="search-form" role="search" class="relative mt-4">
+      <label for="search-input" class="sr-only">Procurar filme ou série</label>
+      <svg
+        aria-hidden="true"
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base-content/50"
+      >
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m20 20-3.5-3.5"></path>
+      </svg>
+      <input
+        id="search-input"
+        name="q"
+        type="search"
+        placeholder="Procurar filme ou série..."
+        autocomplete="off"
+        spellcheck="false"
+        enterkeyhint="search"
+        aria-describedby="search-status"
+        class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 pl-12 pr-4 text-base"
+      />
+    </form>
+
+    <p id="search-status" role="status" class="mt-4 text-sm text-base-content/70">
+      Busque por um filme ou série.
+    </p>
+
+    <ul
+      id="search-results"
+      aria-label="Resultados da busca"
+      class="mt-2 flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-4"
+    >
+    </ul>
+    </section>
+
+    <section id="panel-pessoas" role="tabpanel" aria-labelledby="tab-pessoas" hidden>
+    <form id="people-form" role="search" class="relative mt-4">
+      <label for="people-input" class="sr-only">Buscar por nome ou @username</label>
+      <svg
+        aria-hidden="true"
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base-content/50"
+      >
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m20 20-3.5-3.5"></path>
+      </svg>
+      <input
+        id="people-input"
+        name="q"
+        type="search"
+        placeholder="Buscar por nome ou @username..."
+        autocomplete="off"
+        spellcheck="false"
+        enterkeyhint="search"
+        aria-describedby="people-status"
+        class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 pl-12 pr-4 text-base"
+      />
+    </form>
+
+    <p id="people-status" role="status" class="mt-4 text-sm text-base-content/70">
+      Busque pessoas pelo nome ou @username.
+    </p>
+
+    <ul
+      id="people-results"
+      aria-label="Pessoas encontradas"
+      class="mx-auto mt-2 flex w-full max-w-3xl flex-col gap-1"
+    >
+    </ul>
+
+    <div
+      id="people-error"
+      role="alert"
+      style="display: none"
+      class="mt-6 rounded-2xl border border-base-300 bg-base-200 p-5 text-center"
+    >
+      <p>Não foi possível buscar pessoas agora.</p>
+      <button
+        id="people-retry"
+        type="button"
+        class="btn btn-primary mt-4 min-h-12 rounded-full px-8"
+      >
+        Tentar novamente
+      </button>
+    </div>
+    </section>
+
+    <template id="person-result-template">
+      <li>
+        <a
+          data-role="link"
+          href="#"
+          class="cinevee-card flex min-h-12 items-center gap-3 rounded-2xl p-2 hover:bg-base-200"
+        >
+          <span
+            data-role="avatar"
+            aria-hidden="true"
+            class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-lg font-extrabold text-white sm:h-20 sm:w-20"
+          >
+            <img
+              data-role="img"
+              alt=""
+              width="160"
+              height="160"
+              loading="lazy"
+              class="h-full w-full object-cover"
+              hidden
+            />
+            <span data-role="initials"></span>
+          </span>
+          <span class="min-w-0 flex-1 py-1">
+            <span data-role="name" class="block truncate font-semibold leading-snug"></span>
+            <span data-role="username" class="block truncate text-sm text-base-content/60"></span>
+            <span data-role="bio" class="mt-0.5 line-clamp-2 block break-words text-sm leading-5 text-base-content/70" hidden></span>
+          </span>
+          <span class="btn btn-ghost min-h-12 shrink-0 rounded-full px-4 text-sm font-semibold text-primary">
+            Ver perfil
+          </span>
+        </a>
+      </li>
+    </template>
+
+    <div
+      id="search-skeleton"
+      aria-hidden="true"
+      style="display: none"
+      class="mt-2 flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-4"
+    >
+      {
+        [0, 1, 2].map(() => (
+          <div class="flex items-center gap-3 p-2">
+            <div class="skeleton h-24 w-16 shrink-0 rounded-xl sm:w-20" />
+            <div class="flex-1 space-y-2">
+              <div class="skeleton h-4 w-3/4" />
+              <div class="skeleton h-3 w-1/2" />
+            </div>
+          </div>
+        ))
+      }
+    </div>
+
+    <div
+      id="search-error"
+      role="alert"
+      style="display: none"
+      class="mt-6 rounded-2xl border border-base-300 bg-base-200 p-5 text-center"
+    >
+      <p>Não foi possível realizar a busca agora.</p>
+      <button
+        id="search-retry"
+        type="button"
+        class="btn btn-primary mt-4 min-h-12 rounded-full px-8"
+      >
+        Tentar novamente
+      </button>
+    </div>
+
+    <SearchResultCard />
+  </main>
+</Layout>
+
+<script>
+  // Busca client-side (vanilla JS, sem frameworks) em duas abas:
+  // TÍTULOS — debounce 350ms + AbortController + URL (?q=).
+  //   O navegador conhece apenas /api/search — nunca o TMDB/token.
+  // PESSOAS — debounce 300ms + AbortController + URL (?tab=pessoas&q=).
+  //   O navegador conhece apenas /api/public/users/search.
+  // Cada aba tem input, estado e endpoint próprios (nunca misturam results).
+  // A URL é a fonte de verdade: refresh, share e voltar/avançar restauram
+  // aba + query + resultados.
+  var DEBOUNCE_MS = 350;
+  var PEOPLE_DEBOUNCE_MS = 300;
+
+  interface SearchItem {
+    id: number;
+    type: "movie" | "tv";
+    title: string;
+    year?: number;
+    rating?: number;
+    posterUrl?: string;
+    hue?: number;
+  }
+
+  interface PersonItem {
+    username: string;
+    displayName?: string;
+    avatarUrl?: string;
+    bio?: string;
+  }
+
+  var tabTitulos = document.getElementById("tab-titulos") as HTMLButtonElement;
+  var tabPessoas = document.getElementById("tab-pessoas") as HTMLButtonElement;
+  var panelTitulos = document.getElementById("panel-titulos") as HTMLElement;
+  var panelPessoas = document.getElementById("panel-pessoas") as HTMLElement;
+
+  var form = document.getElementById("search-form") as HTMLFormElement;
+  var input = document.getElementById("search-input") as HTMLInputElement;
+  var status = document.getElementById("search-status") as HTMLElement;
+  var list = document.getElementById("search-results") as HTMLElement;
+  var skeleton = document.getElementById("search-skeleton") as HTMLElement;
+  var errorBox = document.getElementById("search-error") as HTMLElement;
+  var retryButton = document.getElementById("search-retry") as HTMLButtonElement;
+  var cardTemplate = document.getElementById("search-result-template") as HTMLTemplateElement;
+
+  var peopleForm = document.getElementById("people-form") as HTMLFormElement;
+  var peopleInput = document.getElementById("people-input") as HTMLInputElement;
+  var peopleStatus = document.getElementById("people-status") as HTMLElement;
+  var peopleList = document.getElementById("people-results") as HTMLElement;
+  var peopleError = document.getElementById("people-error") as HTMLElement;
+  var peopleRetry = document.getElementById("people-retry") as HTMLButtonElement;
+  var personTemplate = document.getElementById("person-result-template") as HTMLTemplateElement;
+
+  var debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  var aborter: AbortController | null = null;
+  var requestSeq = 0;
+  var lastQuery = "";
+
+  var peopleTimer: ReturnType<typeof setTimeout> | null = null;
+  var peopleAborter: AbortController | null = null;
+  var peopleSeq = 0;
+  var peopleLastQuery = "";
+
+  var activeTab = "titulos";
+  var TAB_ACTIVE = ["bg-base-100", "shadow", "text-base-content"];
+  var TAB_IDLE = ["text-base-content/60"];
+
+  function show(element: HTMLElement): void {
+    if (!(element instanceof HTMLElement)) return;
+    element.style.display = "";
+  }
+
+  function hide(element: HTMLElement): void {
+    if (!(element instanceof HTMLElement)) return;
+    element.style.display = "none";
+  }
+
+  function paintTab(button: HTMLButtonElement, selected: boolean): void {
+    if (!(button instanceof HTMLButtonElement)) return;
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.tabIndex = selected ? 0 : -1;
+    for (var i = 0; i < TAB_ACTIVE.length; i++) {
+      button.classList.toggle(TAB_ACTIVE[i], selected);
+    }
+    for (var j = 0; j < TAB_IDLE.length; j++) {
+      button.classList.toggle(TAB_IDLE[j], !selected);
+    }
+  }
+
+  function currentQuery(): string {
+    if (!(peopleInput instanceof HTMLInputElement) || !(input instanceof HTMLInputElement)) return "";
+    return activeTab === "pessoas" ? peopleInput.value.trim() : input.value.trim();
+  }
+
+  function syncUrl(): void {
+    var query = currentQuery();
+    var url;
+    if (activeTab === "pessoas") {
+      url = "/buscar?tab=pessoas" + (query ? "&q=" + encodeURIComponent(query) : "");
+    } else {
+      url = query ? "/buscar?q=" + encodeURIComponent(query) : "/buscar";
+    }
+    history.replaceState(null, "", url);
+  }
+
+  function setActiveTab(tab: string, focusInput: boolean): void {
+    activeTab = tab === "pessoas" ? "pessoas" : "titulos";
+    var people = activeTab === "pessoas";
+    if (!(tabTitulos instanceof HTMLButtonElement) || !(tabPessoas instanceof HTMLButtonElement)) return;
+    if (!(panelTitulos instanceof HTMLElement) || !(panelPessoas instanceof HTMLElement)) return;
+    paintTab(tabTitulos, !people);
+    paintTab(tabPessoas, people);
+    if (people) {
+      panelTitulos.setAttribute("hidden", "");
+      panelPessoas.removeAttribute("hidden");
+    } else {
+      panelPessoas.setAttribute("hidden", "");
+      panelTitulos.removeAttribute("hidden");
+    }
+    syncUrl();
+    if (focusInput) {
+      var target: HTMLInputElement = people ? peopleInput : input;
+      if (!(target instanceof HTMLInputElement)) return;
+      target.focus();
+    }
+  }
+
+  function clearResults(): void {
+    if (!(list instanceof HTMLElement)) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+  }
+
+  function renderIdle(query: string): void {
+    clearResults();
+    if (!(skeleton instanceof HTMLElement) || !(errorBox instanceof HTMLElement)) return;
+    if (!(status instanceof HTMLElement)) return;
+    hide(skeleton);
+    hide(errorBox);
+    status.textContent =
+      query.length === 0
+        ? "Busque por um filme ou série."
+        : "Digite pelo menos 2 caracteres para buscar.";
+  }
+
+  function renderLoading(): void {
+    clearResults();
+    if (!(errorBox instanceof HTMLElement) || !(skeleton instanceof HTMLElement)) return;
+    if (!(status instanceof HTMLElement)) return;
+    hide(errorBox);
+    show(skeleton);
+    status.textContent = "Buscando...";
+  }
+
+  function typeLabel(type: string): string {
+    return type === "tv" ? "Série" : "Filme";
+  }
+
+  function isValidItem(item: unknown): item is SearchItem {
+    if (typeof item !== "object" || item === null) return false;
+    var candidate = item as Record<string, unknown>;
+    return (
+      typeof candidate.id === "number" &&
+      (candidate.type === "movie" || candidate.type === "tv") &&
+      typeof candidate.title === "string" &&
+      (candidate.title as string).length > 0
+    );
+  }
+
+  function renderResults(query: string, results: unknown[]): void {
+    clearResults();
+    if (!(skeleton instanceof HTMLElement) || !(errorBox instanceof HTMLElement)) return;
+    if (!(status instanceof HTMLElement)) return;
+    hide(skeleton);
+    hide(errorBox);
+
+    var valid = results.filter(isValidItem);
+
+    if (valid.length === 0) {
+      status.textContent = 'Nenhum título encontrado para "' + query + '".';
+      return;
+    }
+
+    status.textContent =
+      valid.length === 1
+        ? '1 resultado para "' + query + '".'
+        : valid.length + ' resultados para "' + query + '".';
+
+    for (var i = 0; i < valid.length; i++) {
+      if (!(list instanceof HTMLElement)) return;
+      list.appendChild(buildCard(valid[i]));
+    }
+  }
+
+  function buildCard(item: SearchItem): Node {
+    if (!(cardTemplate instanceof HTMLTemplateElement)) return document.createDocumentFragment();
+    var node = cardTemplate.content.cloneNode(true) as DocumentFragment;
+    var label = typeLabel(item.type);
+
+    var link = node.querySelector('[data-role="link"]');
+    if (!(link instanceof HTMLAnchorElement)) return node;
+    link.href = "/titulo/" + item.type + "/" + item.id;
+    link.setAttribute(
+      "aria-label",
+      item.title + ", " + label.toLowerCase() + (item.year ? " de " + item.year : ""),
+    );
+
+    var poster = node.querySelector('[data-role="poster"]');
+    if (poster instanceof HTMLElement) {
+      poster.style.setProperty("--ph", String(item.hue));
+    }
+
+    if (item.posterUrl) {
+      var img = node.querySelector('[data-role="img"]');
+      if (img instanceof HTMLImageElement) {
+        img.src = item.posterUrl;
+        img.alt = "Pôster de " + item.title;
+        img.removeAttribute("hidden");
+      }
+    }
+
+    var titleEl = node.querySelector('[data-role="title"]');
+    if (titleEl) titleEl.textContent = item.title;
+
+    var metaText = item.year ? item.year + " · " + label : label;
+    var meta = node.querySelector('[data-role="meta"]');
+    if (meta) meta.textContent = metaText;
+
+    if (typeof item.rating === "number") {
+      var rating = node.querySelector('[data-role="rating"]');
+      if (rating instanceof HTMLElement) {
+        rating.removeAttribute("hidden");
+        var ratingValue = rating.querySelector('[data-role="rating-value"]');
+        if (ratingValue) ratingValue.textContent = item.rating.toFixed(1);
+      }
+    }
+
+    return node;
+  }
+
+  function renderError(): void {
+    clearResults();
+    if (!(skeleton instanceof HTMLElement) || !(errorBox instanceof HTMLElement)) return;
+    if (!(status instanceof HTMLElement)) return;
+    hide(skeleton);
+    show(errorBox);
+    status.textContent = "Não foi possível realizar a busca agora.";
+  }
+
+  function executeSearch(query: string): void {
+    if (aborter) aborter.abort();
+    aborter = new AbortController();
+    var mySeq = (requestSeq += 1);
+    lastQuery = query;
+
+    syncUrl();
+    renderLoading();
+
+    fetch("/api/search?q=" + encodeURIComponent(query), {
+      signal: aborter.signal,
+    })
+      .then(function (response) {
+        if (mySeq !== requestSeq) return null;
+        if (!response.ok) {
+          renderError();
+          return null;
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        if (!data || mySeq !== requestSeq) return;
+        renderResults(
+          query,
+          Array.isArray(data.results) ? data.results : [],
+        );
+      })
+      .catch(function (error) {
+        if ((error && error.name === "AbortError") || mySeq !== requestSeq) return;
+        renderError();
+      });
+  }
+
+  function scheduleSearch(): void {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (!(input instanceof HTMLInputElement)) return;
+    var query = input.value.trim();
+
+    if (query.length < 2) {
+      // Cancela busca pendente e nunca chama a API com query curta.
+      if (aborter) aborter.abort();
+      requestSeq += 1;
+      lastQuery = "";
+      syncUrl();
+      renderIdle(query);
+      return;
+    }
+
+    debounceTimer = setTimeout(function () {
+      executeSearch(query);
+    }, DEBOUNCE_MS);
+  }
+
+  if (form instanceof HTMLFormElement) {
+    form.addEventListener("submit", function (event: Event): void {
+      event.preventDefault();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (!(input instanceof HTMLInputElement)) return;
+      var query = input.value.trim();
+      if (query.length >= 2) executeSearch(query);
+      else {
+        lastQuery = "";
+        syncUrl();
+        renderIdle(query);
+      }
+    });
+  }
+
+  if (input instanceof HTMLInputElement) {
+    input.addEventListener("input", scheduleSearch);
+  }
+
+  if (retryButton instanceof HTMLButtonElement) {
+    retryButton.addEventListener("click", function (): void {
+      if (!(input instanceof HTMLInputElement)) return;
+      var query = (lastQuery || input.value).trim();
+      if (query.length >= 2) executeSearch(query);
+    });
+  }
+
+  // ---- Pessoas (perfis públicos + discoverable via /api/public/users/search)
+  function clearPeople(): void {
+    if (!(peopleList instanceof HTMLElement)) return;
+    while (peopleList.firstChild) peopleList.removeChild(peopleList.firstChild);
+  }
+
+  function renderPeopleIdle(query: string): void {
+    clearPeople();
+    if (!(peopleError instanceof HTMLElement)) return;
+    if (!(peopleStatus instanceof HTMLElement)) return;
+    hide(peopleError);
+    peopleStatus.textContent =
+      query.length === 0
+        ? "Busque pessoas pelo nome ou @username."
+        : "Digite pelo menos 2 caracteres.";
+  }
+
+  function renderPeopleLoading(): void {
+    clearPeople();
+    if (!(peopleError instanceof HTMLElement)) return;
+    if (!(peopleStatus instanceof HTMLElement)) return;
+    hide(peopleError);
+    peopleStatus.textContent = "Buscando pessoas...";
+  }
+
+  function isValidPerson(item: unknown): item is PersonItem {
+    if (typeof item !== "object" || item === null) return false;
+    var candidate = item as Record<string, unknown>;
+    return (
+      typeof candidate.username === "string" &&
+      (candidate.username as string).length > 0
+    );
+  }
+
+  function personInitials(item: PersonItem): string {
+    var base = (typeof item.displayName === "string" && item.displayName.trim()) || item.username;
+    var parts = base.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return "?";
+    var first = parts[0].charAt(0) || "";
+    var last = parts.length > 1 ? parts[parts.length - 1].charAt(0) || "" : "";
+    return (first + last).toUpperCase() || "?";
+  }
+
+  function renderPeopleResults(query: string, results: unknown[]): void {
+    clearPeople();
+    if (!(peopleError instanceof HTMLElement)) return;
+    if (!(peopleStatus instanceof HTMLElement)) return;
+    hide(peopleError);
+
+    var valid = results.filter(isValidPerson);
+
+    if (valid.length === 0) {
+      peopleStatus.textContent = 'Nenhum perfil encontrado para "' + query + '". Tente pesquisar outro nome ou @username.';
+      return;
+    }
+
+    peopleStatus.textContent =
+      valid.length === 1
+        ? '1 perfil encontrado para "' + query + '".'
+        : valid.length + ' perfis encontrados para "' + query + '".';
+
+    for (var i = 0; i < valid.length; i++) {
+      if (!(peopleList instanceof HTMLElement)) return;
+      peopleList.appendChild(buildPersonCard(valid[i]));
+    }
+  }
+
+  function buildPersonCard(item: PersonItem): Node {
+    if (!(personTemplate instanceof HTMLTemplateElement)) return document.createDocumentFragment();
+    var node = personTemplate.content.cloneNode(true) as DocumentFragment;
+    var name =
+      typeof item.displayName === "string" && item.displayName.trim()
+        ? item.displayName.trim()
+        : "@" + item.username;
+
+    var link = node.querySelector('[data-role="link"]');
+    if (!(link instanceof HTMLAnchorElement)) return node;
+    link.href = "/u/" + item.username;
+    link.setAttribute("aria-label", name + ", @" + item.username);
+
+    if (typeof item.avatarUrl === "string" && item.avatarUrl.length > 0) {
+      var img = node.querySelector('[data-role="img"]');
+      if (img instanceof HTMLImageElement) {
+        img.src = item.avatarUrl;
+        img.removeAttribute("hidden");
+      }
+      var initials = node.querySelector('[data-role="initials"]');
+      if (initials instanceof HTMLElement) initials.setAttribute("hidden", "");
+    } else {
+      var fallback = node.querySelector('[data-role="initials"]');
+      if (fallback) fallback.textContent = personInitials(item);
+    }
+
+    var nameEl = node.querySelector('[data-role="name"]');
+    if (nameEl) nameEl.textContent = name;
+    var usernameEl = node.querySelector('[data-role="username"]');
+    if (usernameEl) usernameEl.textContent = "@" + item.username;
+
+    if (typeof item.bio === "string" && item.bio.trim().length > 0) {
+      var bio = node.querySelector('[data-role="bio"]');
+      if (bio instanceof HTMLElement) {
+        bio.textContent = item.bio.trim();
+        bio.removeAttribute("hidden");
+      }
+    }
+
+    return node;
+  }
+
+  function renderPeopleError(): void {
+    clearPeople();
+    if (!(peopleError instanceof HTMLElement)) return;
+    if (!(peopleStatus instanceof HTMLElement)) return;
+    show(peopleError);
+    peopleStatus.textContent = "Não foi possível buscar pessoas agora.";
+  }
+
+  function executePeopleSearch(query: string): void {
+    if (peopleAborter) peopleAborter.abort();
+    peopleAborter = new AbortController();
+    var mySeq = (peopleSeq += 1);
+    peopleLastQuery = query;
+
+    syncUrl();
+    renderPeopleLoading();
+
+    fetch("/api/public/users/search?q=" + encodeURIComponent(query), {
+      signal: peopleAborter.signal,
+    })
+      .then(function (response) {
+        if (mySeq !== peopleSeq) return null;
+        if (!response.ok) {
+          renderPeopleError();
+          return null;
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        if (!data || mySeq !== peopleSeq) return;
+        renderPeopleResults(
+          query,
+          Array.isArray(data.results) ? data.results : [],
+        );
+      })
+      .catch(function (error) {
+        if ((error && error.name === "AbortError") || mySeq !== peopleSeq) return;
+        renderPeopleError();
+      });
+  }
+
+  function schedulePeopleSearch(): void {
+    if (peopleTimer) clearTimeout(peopleTimer);
+    if (!(peopleInput instanceof HTMLInputElement)) return;
+    var query = peopleInput.value.trim();
+
+    if (query.length < 2) {
+      // Cancela busca pendente e nunca chama a API com query curta.
+      if (peopleAborter) peopleAborter.abort();
+      peopleSeq += 1;
+      peopleLastQuery = "";
+      syncUrl();
+      renderPeopleIdle(query);
+      return;
+    }
+
+    peopleTimer = setTimeout(function () {
+      executePeopleSearch(query);
+    }, PEOPLE_DEBOUNCE_MS);
+  }
+
+  if (peopleForm instanceof HTMLFormElement) {
+    peopleForm.addEventListener("submit", function (event: Event): void {
+      event.preventDefault();
+      if (peopleTimer) clearTimeout(peopleTimer);
+      if (!(peopleInput instanceof HTMLInputElement)) return;
+      var query = peopleInput.value.trim();
+      if (query.length >= 2) executePeopleSearch(query);
+      else {
+        peopleLastQuery = "";
+        syncUrl();
+        renderPeopleIdle(query);
+      }
+    });
+  }
+
+  if (peopleInput instanceof HTMLInputElement) {
+    peopleInput.addEventListener("input", schedulePeopleSearch);
+  }
+
+  if (peopleRetry instanceof HTMLButtonElement) {
+    peopleRetry.addEventListener("click", function (): void {
+      if (!(peopleInput instanceof HTMLInputElement)) return;
+      var query = (peopleLastQuery || peopleInput.value).trim();
+      if (query.length >= 2) executePeopleSearch(query);
+    });
+  }
+
+  // ---- Tabs (a URL é a fonte de verdade)
+  function tabFromUrl(): string {
+    var params = new URLSearchParams(window.location.search);
+    return params.get("tab") === "pessoas" ? "pessoas" : "titulos";
+  }
+
+  function restoreFromUrl(run: boolean): void {
+    var params = new URLSearchParams(window.location.search);
+    var tab = tabFromUrl();
+    var query = (params.get("q") || "").trim();
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (peopleTimer) clearTimeout(peopleTimer);
+    // Inputs primeiro: setActiveTab sincroniza a URL a partir deles.
+    if (tab === "pessoas") {
+      if (!(peopleInput instanceof HTMLInputElement)) return;
+      peopleInput.value = params.get("q") || "";
+    } else {
+      if (!(input instanceof HTMLInputElement)) return;
+      input.value = params.get("q") || "";
+    }
+    setActiveTab(tab, false);
+    if (tab === "pessoas") {
+      if (query.length >= 2) {
+        if (run) executePeopleSearch(query);
+        else {
+          peopleLastQuery = query;
+          renderPeopleIdle(query);
+        }
+      } else {
+        peopleLastQuery = "";
+        renderPeopleIdle(query);
+      }
+    } else {
+      if (query.length >= 2) {
+        if (run) executeSearch(query);
+        else {
+          lastQuery = query;
+          renderIdle(query);
+        }
+      } else {
+        lastQuery = "";
+        renderIdle(query);
+      }
+    }
+  }
+
+  function focusTab(tab: string): void {
+    setActiveTab(tab, true);
+  }
+
+  if (tabTitulos instanceof HTMLButtonElement) {
+    tabTitulos.addEventListener("click", function (): void {
+      focusTab("titulos");
+    });
+  }
+
+  if (tabPessoas instanceof HTMLButtonElement) {
+    tabPessoas.addEventListener("click", function (): void {
+      focusTab("pessoas");
+    });
+  }
+
+  var tablist = document.querySelector('[role="tablist"]');
+  if (tablist instanceof HTMLElement) {
+    tablist.addEventListener("keydown", function (event: KeyboardEvent): void {
+      var next: string | null = null;
+      if (event.key === "ArrowRight") next = activeTab === "titulos" ? "pessoas" : "titulos";
+      else if (event.key === "ArrowLeft") next = activeTab === "pessoas" ? "titulos" : "pessoas";
+      else if (event.key === "Home") next = "titulos";
+      else if (event.key === "End") next = "pessoas";
+      if (next) {
+        event.preventDefault();
+        focusTab(next);
+      }
+    });
+  }
+
+  // Restaura ao navegar (voltar/avançar) ou ao abrir URL compartilhada.
+  window.addEventListener("popstate", function () {
+    restoreFromUrl(true);
+  });
+
+  // Entrada direta executa a busca imediatamente (sem debounce).
+  (function initFromUrl() {
+    restoreFromUrl(true);
+  })();
+</script>

@@ -1,0 +1,342 @@
+---
+/**
+ * /explorar/[section] — página expandida de categoria (Etapa 11).
+ *
+ * UMA rota dinâmica + presets centrais (zero duplicação entre as 5).
+ * Slug fora da allowlist → 404. SSR na primeira página (URL com filtros
+ * compartilhável); "Carregar mais" via GET /api/explore.
+ * Sem IA, sem Supabase — só TMDB. Totalmente deslogado.
+ */
+import "../../styles/global.css";
+import Layout from "../../layouts/Layout.astro";
+import AppHeader from "../../components/navigation/AppHeader.astro";
+import ExploreFilters from "../../components/explore/ExploreFilters.astro";
+import ExploreGrid from "../../components/explore/ExploreGrid.astro";
+import TitleNotFound from "../../components/details/TitleNotFound.astro";
+import { getExplorePreset } from "../../lib/explore/presets";
+import {
+  activeFilterCount,
+  currentYear,
+  filtersToQuery,
+  parseExploreFilters,
+} from "../../lib/explore/filters";
+import { fetchExplorePage } from "../../lib/explore/service";
+
+export const prerender = false;
+
+const { section } = Astro.params;
+const preset = getExplorePreset(section ?? "");
+
+if (!preset) {
+  Astro.response.status = 404;
+}
+
+const filters = preset
+  ? parseExploreFilters(preset, (name) => Astro.url.searchParams.get(name))
+  : null;
+const activeCount = preset && filters ? activeFilterCount(preset, filters) : 0;
+const maxYear = currentYear();
+const basePath = preset ? `/explorar/${preset.slug}` : "/";
+
+let items: Awaited<ReturnType<typeof fetchExplorePage>>["items"] = [];
+let page = 1;
+let hasMore = false;
+let loadFailed = false;
+let unsupportedCombination = false;
+
+if (preset && filters) {
+  try {
+    const result = await fetchExplorePage(preset, filters, 1);
+    items = result.items;
+    page = result.page;
+    hasMore = result.hasMore;
+    unsupportedCombination = result.unsupportedCombination;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "erro desconhecido";
+    console.error(`[Explore] Falha em ${preset.slug} (${message}).`);
+    loadFailed = true;
+  }
+}
+
+const filterQuery = filters ? filtersToQuery(filters) : "";
+const pageTitle = preset ? `${preset.title} — CineVee` : "Seção não encontrada — CineVee";
+---
+
+<Layout title={pageTitle} description={preset?.description ?? "Explorar títulos no CineVee."}>
+  <AppHeader />
+  {
+    !preset ? (
+      <main>
+        <TitleNotFound
+          heading="Seção não encontrada."
+          text="A categoria que você procurou não existe. Volte para a Home e explore as seleções."
+        />
+      </main>
+    ) : (
+      <main class="mx-auto w-full max-w-7xl px-4 pb-32 sm:px-6 lg:px-8">
+        <p class="pt-6 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+          {preset.eyebrow}
+        </p>
+        <h1 class="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">{preset.title}</h1>
+        <p class="mt-2 max-w-prose text-sm text-base-content/60 sm:text-base">
+          {preset.description}
+        </p>
+
+        {filters && (
+          <ExploreFilters preset={preset} filters={filters} activeCount={activeCount} maxYear={maxYear} />
+        )}
+
+        {
+          loadFailed ? (
+            <div role="alert" class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm">
+              <p>Não foi possível carregar os títulos agora.</p>
+              <a href={filterQuery ? `${basePath}?${filterQuery}` : basePath} class="btn btn-outline mt-3 min-h-12 rounded-full px-6 text-sm">
+                Tentar novamente
+              </a>
+            </div>
+          ) : unsupportedCombination ? (
+            <div class="mt-6 flex flex-col items-center rounded-3xl border border-base-300 bg-base-200/40 px-6 py-12 text-center">
+              <p class="text-lg font-bold">Essa combinação ainda não é suportada.</p>
+              <p class="mt-1 max-w-[44ch] text-sm text-base-content/60">
+                Terror possui categoria oficial apenas em filmes — séries não têm equivalente direto no catálogo.
+              </p>
+              <div class="mt-6 flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <a
+                  href="/explorar/filmes-populares?genero=horror"
+                  class="btn btn-primary min-h-12 rounded-full px-8"
+                >
+                  Ver filmes de terror
+                </a>
+                <a
+                  href={basePath}
+                  class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-8"
+                >
+                  Limpar filtros
+                </a>
+              </div>
+            </div>
+          ) : items.length === 0 ? (
+            <div class="mt-6 flex flex-col items-center rounded-3xl border border-base-300 bg-base-200/40 px-6 py-12 text-center">
+              <p class="text-lg font-bold">Nenhum título encontrado com esses filtros.</p>
+              <p class="mt-1 max-w-[38ch] text-sm text-base-content/60">
+                Tente uma combinação menos restrita.
+              </p>
+              <a href={basePath} class="btn btn-primary mt-6 min-h-12 rounded-full px-8">
+                Limpar filtros
+              </a>
+            </div>
+          ) : (
+            <>
+              <p role="status" data-explore-status class="mt-6 text-sm text-base-content/60">
+                Mostrando {items.length} título{items.length === 1 ? "" : "s"}
+              </p>
+              <div class="mt-4">
+                <ExploreGrid items={items} label={`Títulos de ${preset.title}`} />
+              </div>
+              {
+                hasMore && (
+                  <div class="mt-8 flex flex-col items-center gap-3">
+                    <button
+                      type="button"
+                      data-explore-more
+                      data-section={preset.slug}
+                      data-query={filterQuery}
+                      data-next-page={page + 1}
+                      class="btn btn-outline min-h-12 rounded-full px-10"
+                    >
+                      Carregar mais
+                    </button>
+                    <p role="status" data-explore-more-status class="min-h-5 text-xs text-base-content/60" />
+                  </div>
+                )
+              }
+              <p data-explore-end hidden class="mt-8 text-center text-sm text-base-content/50">
+                Você chegou ao fim desta seleção.
+              </p>
+            </>
+          )
+        }
+      </main>
+    )
+  }
+</Layout>
+
+<template id="explore-card-template">
+  <li data-explore-card>
+    <a
+      data-role="link"
+      href="#"
+      class="cinevee-card group block w-full rounded-xl"
+    >
+      <div data-role="poster" class="cinevee-poster" style="--ph: 250" aria-hidden="true">
+        <svg
+          aria-hidden="true"
+          class="absolute inset-0 m-auto h-10 w-10 text-white/25"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+        </svg>
+        <img
+          data-role="img"
+          alt=""
+          width="500"
+          height="750"
+          loading="lazy"
+          class="absolute inset-0 h-full w-full object-cover"
+          hidden
+        />
+        <span
+          data-role="badge"
+          class="absolute left-2.5 top-2 rounded-full border border-white/15 bg-black/45 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm"
+        >
+        </span>
+      </div>
+      <div class="mt-2 px-0.5">
+        <p data-role="title" class="truncate text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+        </p>
+        <p data-role="meta" class="mt-0.5 text-xs text-base-content/60"></p>
+      </div>
+    </a>
+  </li>
+</template>
+
+<script>
+  // "Carregar mais" do Explore: GET /api/explore?page=N com os filtros
+  // atuais → anexa cards (dedupe por mediaType:id) → atualiza status.
+  // Troca de filtro recarrega a página (form GET) — pagination reseta.
+  (function () {
+    var button = document.querySelector("[data-explore-more]") as HTMLButtonElement;
+    var grid = document.getElementById("explore-grid") as HTMLElement;
+    var status = document.querySelector("[data-explore-status]");
+    var moreStatus = document.querySelector("[data-explore-more-status]");
+    var endNote = document.querySelector("[data-explore-end]");
+    var template = document.getElementById("explore-card-template");
+    if (!(button instanceof HTMLButtonElement) || !(grid instanceof HTMLElement)) return;
+
+    var section = button.getAttribute("data-section") ?? "";
+    var query = button.getAttribute("data-query") ?? "";
+    var nextPage = Number(button.getAttribute("data-next-page") ?? "2");
+    var loading = false;
+
+    function seenKeys() {
+      var keys = new Set();
+      grid.querySelectorAll("[data-explore-card]").forEach(function (el) {
+        var key = el.getAttribute("data-key");
+        if (key) keys.add(key);
+      });
+      return keys;
+    }
+
+    interface ExploreItem {
+      id: number;
+      type: "movie" | "tv";
+      title: string;
+      year?: number;
+      rating?: number;
+      posterUrl?: string;
+      hue?: number;
+    }
+
+    function metaText(item: ExploreItem) {
+      var parts = [];
+      if (typeof item.year === "number") parts.push(String(item.year));
+      if (typeof item.rating === "number") parts.push("★ " + item.rating.toFixed(1));
+      return parts.join(" · ");
+    }
+
+    function buildCard(item: ExploreItem) {
+      if (!(template instanceof HTMLTemplateElement)) return null;
+      var node = template.content.cloneNode(true);
+      if (!(node instanceof DocumentFragment)) return null;
+      var fragment = node;
+      var typeLabel = item.type === "tv" ? "Série" : "Filme";
+      var li = fragment.querySelector("[data-explore-card]");
+      if (li instanceof HTMLElement) {
+        li.setAttribute("data-key", item.type + ":" + item.id);
+      }
+      var link = fragment.querySelector('[data-role="link"]');
+      if (link instanceof HTMLAnchorElement) {
+        link.href = "/titulo/" + item.type + "/" + item.id;
+        link.setAttribute(
+          "aria-label",
+          item.title + ", " + typeLabel.toLowerCase() +
+            (typeof item.year === "number" ? " de " + item.year : ""),
+        );
+      }
+      var poster = fragment.querySelector('[data-role="poster"]');
+      if (poster instanceof HTMLElement && typeof item.hue === "number") {
+        poster.style.setProperty("--ph", String(item.hue));
+      }
+      if (typeof item.posterUrl === "string" && item.posterUrl.length > 0) {
+        var img = fragment.querySelector('[data-role="img"]');
+        if (img instanceof HTMLImageElement) {
+          img.src = item.posterUrl;
+          img.alt = "Pôster de " + item.title;
+          img.removeAttribute("hidden");
+        }
+      }
+      var badge = fragment.querySelector('[data-role="badge"]');
+      if (badge) badge.textContent = typeLabel;
+      var title = fragment.querySelector('[data-role="title"]');
+      if (title) title.textContent = item.title;
+      var meta = fragment.querySelector('[data-role="meta"]');
+      if (meta instanceof HTMLElement) meta.textContent = metaText(item);
+      return node;
+    }
+
+    function setLoading(on: boolean) {
+      loading = on;
+      if (on) {
+        button.setAttribute("disabled", "");
+        button.textContent = "Carregando...";
+      } else {
+        button.removeAttribute("disabled");
+        button.textContent = "Carregar mais";
+      }
+    }
+
+    button.addEventListener("click", function () {
+      if (loading) return;
+      setLoading(true);
+      if (moreStatus) moreStatus.textContent = "";
+      var url = "/api/explore?section=" + encodeURIComponent(section) +
+        "&page=" + encodeURIComponent(String(nextPage)) +
+        (query ? "&" + query : "");
+      fetch(url, { credentials: "same-origin" })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(function (data) {
+          var items = data && Array.isArray(data.items) ? data.items : [];
+          var known = seenKeys();
+          for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (!item || typeof item !== "object") continue;
+            if (typeof item.id !== "number" || (item.type !== "movie" && item.type !== "tv")) continue;
+            if (typeof item.title !== "string" || item.title.length === 0) continue;
+            var key = item.type + ":" + item.id;
+            if (known.has(key)) continue;
+            known.add(key);
+            var node = buildCard(item);
+            if (node) grid.appendChild(node);
+          }
+          var total = grid.querySelectorAll("[data-explore-card]").length;
+          if (status) status.textContent = "Mostrando " + total + " título" + (total === 1 ? "" : "s");
+          if (data && data.hasMore === true) {
+            nextPage += 1;
+            setLoading(false);
+          } else {
+            button.remove();
+            if (endNote instanceof HTMLElement) endNote.hidden = false;
+            if (moreStatus) moreStatus.textContent = "";
+          }
+        })
+        .catch(function () {
+          setLoading(false);
+          if (moreStatus) moreStatus.textContent = "Não foi possível carregar mais agora. Tente de novo.";
+        });
+    });
+  })();
+</script>

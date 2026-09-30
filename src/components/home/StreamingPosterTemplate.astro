@@ -1,0 +1,58 @@
+---
+/**
+ * StreamingPosterTemplate — card da seção "Novidades nos streamings".
+ *
+ * Renderiza um `<template>` clonado pelo JavaScript da Home quando os
+ * filtros (Todos/Netflix/...) trocam os resultados via /api/streaming.
+ * O markup replica o MoviePosterCard (mesmas classes, mesmo visual);
+ * os valores são preenchidos via textContent/atributos (sem innerHTML).
+ */
+---
+
+<template id="streaming-card-template">
+  <div role="listitem">
+    <a
+      data-role="link"
+      href="#"
+      class="cinevee-card group relative block w-[138px] shrink-0 rounded-xl focus-visible:outline-2 sm:w-[150px] lg:w-[168px] xl:w-[175px]"
+    >
+      <div
+        data-role="poster"
+        class="cinevee-poster"
+        style="--ph: 250"
+        aria-hidden="true"
+      >
+        <svg
+          aria-hidden="true"
+          class="absolute inset-0 m-auto h-10 w-10 text-white/25"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+        </svg>
+        <img
+          data-role="img"
+          alt=""
+          width="500"
+          height="750"
+          loading="lazy"
+          class="absolute inset-0 h-full w-full object-cover"
+          hidden
+        />
+        <span
+          data-role="badge"
+          class="absolute left-2.5 top-2 rounded-full border border-white/15 bg-black/45 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm"
+        >
+        </span>
+      </div>
+      <div class="mt-2 px-0.5">
+        <p
+          data-role="title"
+          class="cinevee-card-title truncate text-sm font-medium leading-snug text-base-content group-hover:text-primary"
+        >
+        </p>
+        <p data-role="meta" class="mt-0.5 text-xs text-base-content/60"></p>
+      </div>
+    </a>
+  </div>
+</template>

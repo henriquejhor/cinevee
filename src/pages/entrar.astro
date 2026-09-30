@@ -1,0 +1,179 @@
+---
+/**
+ * /entrar — login com e-mail + senha (SSR, sessão via cookies).
+ * Usuário já autenticado → redireciona para `?next=` ou /perfil.
+ */
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+import {
+  createSupabaseServerClient,
+  getCurrentUser,
+  sanitizeNext,
+  toFriendlyAuthError,
+} from "../lib/supabase/server";
+
+export const prerender = false;
+
+const nextParam = Astro.url.searchParams.get("next");
+const next = sanitizeNext(nextParam);
+
+// Já logado → sai daqui.
+{
+  const { user } = await getCurrentUser(Astro.request, Astro.cookies);
+  if (user) {
+    return Astro.redirect(next, 303);
+  }
+}
+
+let formError: string | null = null;
+let emailValue = "";
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const password = String(form.get("password") ?? "");
+  const postNext = sanitizeNext(String(form.get("next") ?? "/perfil"));
+  emailValue = email;
+
+  if (!email || !password) {
+    Astro.response.status = 400;
+    formError = "Informe seu e-mail e sua senha.";
+  } else {
+    try {
+      const supabase = createSupabaseServerClient(Astro.request, Astro.cookies);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        Astro.response.status = 401;
+        formError = toFriendlyAuthError(
+          error,
+          "Não foi possível entrar. Tente de novo em instantes.",
+        );
+      } else {
+        return Astro.redirect(postNext, 303);
+      }
+    } catch (error) {
+      Astro.response.status = 503;
+      formError = toFriendlyAuthError(
+        error,
+        "Não foi possível conectar. Verifique sua internet e tente de novo.",
+      );
+    }
+  }
+}
+---
+
+<Layout title="Entrar — CineVee" description="Entre na sua conta do CineVee." hideDock noindex>
+  <AppHeader />
+  <main class="cinevee-aurora mx-auto w-full max-w-md px-4 pb-16 pt-10 sm:pt-14">
+    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Sua conta</p>
+    <h1 class="mt-3 text-3xl font-extrabold tracking-tight sm:text-4xl">Entrar</h1>
+    <p class="mt-2 text-base text-base-content/70">
+      Acesse para salvar sua lista em qualquer lugar em breve.
+    </p>
+
+    {
+      formError && (
+        <div role="alert" class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm">
+          {formError}
+        </div>
+      )
+    }
+
+    <form id="login-form" method="post" action="/entrar" class="mt-6 flex flex-col gap-4" novalidate>
+      <input type="hidden" name="next" value={next} />
+
+      <div class="flex flex-col gap-2">
+        <label for="login-email" class="text-sm font-semibold">E-mail</label>
+        <input
+          id="login-email"
+          name="email"
+          type="email"
+          required
+          autocomplete="email"
+          inputmode="email"
+          placeholder="voce@exemplo.com"
+          value={emailValue}
+          class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+        />
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label for="login-password" class="text-sm font-semibold">Senha</label>
+        <input
+          id="login-password"
+          name="password"
+          type="password"
+          required
+          autocomplete="current-password"
+          minlength="8"
+          placeholder="Sua senha"
+          class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+        />
+      </div>
+
+      <p id="login-client-error" role="alert" style="display: none" class="rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm"></p>
+
+      <button
+        id="login-submit"
+        type="submit"
+        class="btn btn-primary mt-2 min-h-12 w-full rounded-full text-base font-semibold"
+      >
+        Entrar
+      </button>
+    </form>
+
+    <p class="mt-6 text-center text-sm text-base-content/70">
+      Ainda não tem uma conta?{" "}
+      <a href={next && next !== "/perfil" ? `/cadastrar?next=${encodeURIComponent(next)}` : "/cadastrar"} class="font-semibold text-primary underline-offset-4 hover:underline">
+        Criar conta
+      </a>
+    </p>
+
+    <p class="mt-4 text-center">
+      <a href="/" class="inline-flex min-h-12 items-center rounded-lg px-4 text-sm text-base-content/60 hover:text-base-content">
+        Voltar ao início
+      </a>
+    </p>
+  </main>
+</Layout>
+
+<script>
+  // UX apenas: validação básica + estado de loading.
+  // A validação real é server-side (Supabase).
+  (function () {
+    var form = document.getElementById("login-form") as HTMLFormElement;
+    var submit = document.getElementById("login-submit") as HTMLElement;
+    var clientError = document.getElementById("login-client-error") as HTMLElement;
+    if (!form || !submit || !(form instanceof HTMLFormElement)) return;
+
+    form.addEventListener("submit", function (event) {
+      var email = document.getElementById("login-email");
+      var password = document.getElementById("login-password");
+      var emailVal = email instanceof HTMLInputElement ? email.value.trim() : "";
+      var passVal = password instanceof HTMLInputElement ? password.value : "";
+
+      function fail(message: string) {
+        event.preventDefault();
+        if (clientError) {
+          clientError.textContent = message;
+          clientError.style.display = "";
+        }
+      }
+
+      if (clientError) clientError.style.display = "none";
+      if (!emailVal || !passVal) {
+        fail("Informe seu e-mail e sua senha.");
+        return;
+      }
+      if (passVal.length < 8) {
+        fail("A senha tem pelo menos 8 caracteres.");
+        return;
+      }
+
+      submit.setAttribute("disabled", "");
+      submit.textContent = "Entrando...";
+    });
+  })();
+</script>

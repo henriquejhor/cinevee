@@ -1,0 +1,188 @@
+---
+/**
+ * Editor de preferências — implementação ÚNICA (usado só em /perfil/editar).
+ * /perfil mostra apenas o resumo; a edição vive aqui.
+ *
+ * O displayName atual viaja em campo oculto porque POST
+ * /api/profile/preferences exige nome + preferências juntos (Etapa 2).
+ */
+import { GENRE_OPTIONS, PROVIDER_OPTIONS } from "../../types/discovery";
+
+interface Props {
+  displayName: string;
+  excludedGenres: string[];
+  streamingProviders: string[];
+}
+
+const { displayName, excludedGenres, streamingProviders } = Astro.props;
+const excluded = new Set(excludedGenres);
+const providers = new Set(streamingProviders);
+
+const chipBase = "pref-chip btn min-h-12 rounded-full border px-5 font-semibold";
+const chipOn = "btn-primary border-primary";
+const chipOff = "border-base-300 bg-base-200 text-base-content/80";
+---
+
+<form id="prefs-form" class="mt-4 flex flex-col gap-8">
+  <input type="hidden" id="prefs-displayname" value={displayName} />
+
+  <fieldset>
+    <legend class="text-sm font-semibold">Não quero receber recomendações de</legend>
+    <p class="mt-1 text-sm text-base-content/60">
+      Esses gêneros serão evitados nas suas recomendações.
+    </p>
+    <div class="mt-3 flex flex-wrap gap-2">
+      {
+        GENRE_OPTIONS.map((option) => {
+          const pressed = excluded.has(option.value);
+          return (
+            <button
+              type="button"
+              data-genre={option.value}
+              aria-pressed={pressed ? "true" : "false"}
+              class:list={[chipBase, pressed ? chipOn : chipOff]}
+            >
+              {option.label}
+            </button>
+          );
+        })
+      }
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend class="text-sm font-semibold">Meus streamings</legend>
+    <p class="mt-1 text-sm text-base-content/60">
+      Usaremos seus serviços como seleção inicial ao descobrir novos títulos.
+    </p>
+    <div class="mt-3 flex flex-wrap gap-2">
+      {
+        PROVIDER_OPTIONS.map((option) => {
+          const pressed = providers.has(option.value);
+          return (
+            <button
+              type="button"
+              data-provider={option.value}
+              aria-pressed={pressed ? "true" : "false"}
+              class:list={[chipBase, pressed ? chipOn : chipOff]}
+            >
+              {option.label}
+            </button>
+          );
+        })
+      }
+    </div>
+  </fieldset>
+
+  <p id="prefs-status" role="status" aria-live="polite" style="display: none" class="rounded-2xl border px-4 py-3 text-sm"></p>
+
+  <button
+    id="prefs-submit"
+    type="submit"
+    class="btn btn-primary min-h-12 w-full rounded-full text-base font-semibold sm:w-auto sm:px-10"
+  >
+    Salvar preferências
+  </button>
+</form>
+
+<script>
+  // Chips multi-select + salvamento via POST /api/profile/preferences.
+  // Nenhum user_id sai do browser: o backend deriva da sessão.
+  (function () {
+    var form = document.getElementById("prefs-form") as HTMLFormElement;
+    var submit = document.getElementById("prefs-submit") as HTMLButtonElement;
+    var status = document.getElementById("prefs-status") as HTMLElement;
+    var nameInput = document.getElementById("prefs-displayname");
+    if (!(form instanceof HTMLFormElement) || !submit || !status) return;
+
+    var ON = ["btn-primary", "border-primary"];
+    var OFF = ["border-base-300", "bg-base-200", "text-base-content/80"];
+
+    function paint(button: HTMLButtonElement, pressed: boolean) {
+      button.setAttribute("aria-pressed", pressed ? "true" : "false");
+      for (var i = 0; i < ON.length; i++) button.classList.toggle(ON[i], pressed);
+      for (var j = 0; j < OFF.length; j++) button.classList.toggle(OFF[j], !pressed);
+    }
+
+    form.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof HTMLButtonElement)) return;
+      if (target.type !== "button") return;
+      if (!target.hasAttribute("data-genre") && !target.hasAttribute("data-provider")) return;
+      paint(target, target.getAttribute("aria-pressed") !== "true");
+      hideStatus();
+    });
+
+    function showStatus(kind: "ok" | "error", message: string) {
+      status.textContent = message;
+      status.style.display = "";
+      status.className =
+        "rounded-2xl border px-4 py-3 text-sm " +
+        (kind === "ok"
+          ? "border-success/40 bg-success/10"
+          : "border-error/40 bg-error/10");
+    }
+
+    function hideStatus() {
+      status.style.display = "none";
+    }
+
+    function selected(attr: string) {
+      var values = [];
+      var pressed = form.querySelectorAll('button[' + attr + '][aria-pressed="true"]');
+      for (var i = 0; i < pressed.length; i++) {
+        var el = pressed[i];
+        if (el instanceof HTMLButtonElement) {
+          var value = el.getAttribute(attr);
+          if (value) values.push(value);
+        }
+      }
+      return values;
+    }
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      hideStatus();
+
+      var displayName = nameInput instanceof HTMLInputElement ? nameInput.value : "";
+
+      submit.setAttribute("disabled", "");
+      var original = submit.textContent;
+      submit.textContent = "Salvando...";
+
+      fetch("/api/profile/preferences", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: displayName,
+          excludedGenres: selected("data-genre"),
+          streamingProviders: selected("data-provider"),
+        }),
+      })
+        .then(function (response) {
+          return response.json().then(function (data) {
+            return { ok: response.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (result.ok) {
+            showStatus("ok", "Preferências salvas.");
+          } else {
+            var message =
+              result.data && typeof result.data.error === "string"
+                ? result.data.error
+                : "Não foi possível salvar suas preferências.";
+            showStatus("error", message);
+          }
+        })
+        .catch(function () {
+          showStatus("error", "Não foi possível salvar suas preferências.");
+        })
+        .finally(function () {
+          submit.removeAttribute("disabled");
+          submit.textContent = original;
+        });
+    });
+  })();
+</script>

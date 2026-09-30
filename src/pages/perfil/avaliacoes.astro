@@ -1,0 +1,531 @@
+---
+/**
+ * /perfil/avaliacoes — Avaliações (Etapa 7 Supabase + RLS).
+ * Exige autenticação: deslogado → /entrar?next=%2Fperfil%2Favaliacoes.
+ * Usa o ProfileShell compartilhado (mesmo hero/avatar/stats/tabs).
+ * Mais recentemente avaliados primeiro (updated_at DESC, backend).
+ * Remover a avaliação mantém o título em Assistidos.
+ * Edição da nota: no Details (clique no título).
+ */
+import "../../styles/global.css";
+import Layout from "../../layouts/Layout.astro";
+import AppHeader from "../../components/navigation/AppHeader.astro";
+import ProfileShell from "../../components/profile/ProfileShell.astro";
+import ReviewEditor from "../../components/ratings/ReviewEditor.astro";
+import { getDisplayName } from "../../lib/supabase/server";
+import { getUserProfile } from "../../lib/profile/service";
+import { getWatchlistCount } from "../../lib/watchlist/service";
+import { getWatchedCount } from "../../lib/watched/service";
+import {
+  getRatingsCount,
+  getUserRatings,
+} from "../../lib/ratings/service";
+import { buildPosterUrl } from "../../lib/tmdb/image";
+
+export const prerender = false;
+
+// UMA sessão validada (1 auth.getUser) compartilhada entre profile e
+// lista — antes eram 2 roundtrips de auth por request.
+const { supabase, user, profile } = await getUserProfile(Astro.request, Astro.cookies);
+
+if (!user) {
+  return Astro.redirect("/entrar?next=%2Fperfil%2Favaliacoes", 303);
+}
+
+const ctx = { supabase, user };
+const displayName = profile?.displayName?.trim()
+  ? (profile.displayName as string)
+  : getDisplayName(user);
+
+// Cargas independentes em paralelo (antes: awaits seriais).
+function settledValue<T>(res: PromiseSettledResult<T>, fallback: T): T {
+  return res.status === "fulfilled" ? res.value : fallback;
+}
+
+const [watchlistCountRes, watchedCountRes, ratingsCountRes, itemsRes] =
+  await Promise.allSettled([
+    getWatchlistCount(ctx),
+    getWatchedCount(ctx),
+    getRatingsCount(ctx),
+    getUserRatings(ctx),
+  ]);
+
+const watchlistCount: number | null = settledValue(watchlistCountRes, null);
+const watchedCount: number | null = settledValue(watchedCountRes, null);
+const ratingsCount: number | null = settledValue(ratingsCountRes, null);
+
+const items: Awaited<ReturnType<typeof getUserRatings>> = settledValue(itemsRes, []);
+const loadFailed = itemsRes.status === "rejected";
+
+function typeLabel(mediaType: string): string {
+  return mediaType === "tv" ? "Série" : "Filme";
+}
+---
+
+<Layout title="Avaliações — CineVee" description="As notas que você deu para filmes e séries." noindex>
+  <AppHeader />
+  <main>
+    <ProfileShell
+      displayName={displayName}
+      username={profile?.username ?? null}
+      bio={profile?.bio ?? null}
+      avatarUrl={profile?.avatarUrl ?? null}
+      watchlistCount={watchlistCount}
+      watchedCount={watchedCount}
+      ratingsCount={ratingsCount}
+      activeTab="ratings"
+    >
+      <h2 class="mt-10 text-xl font-bold tracking-tight">Suas avaliações</h2>
+      <p class="mt-1 text-sm text-base-content/60">
+        Suas notas e opiniões. As estrelas mudam no título; a opinião dá para editar por aqui.
+      </p>
+
+      {
+        loadFailed ? (
+          <div role="alert" class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm">
+            Não foi possível carregar suas avaliações agora. Tente novamente em instantes.
+          </div>
+        ) : (
+          <>
+            <div
+              id="ratings-empty"
+              style={items.length > 0 ? "display: none" : undefined}
+              class="mt-6 flex flex-col items-center rounded-3xl border border-base-300 bg-base-200/40 px-6 py-12 text-center"
+            >
+              <svg
+                aria-hidden="true"
+                width="40"
+                height="40"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-base-content/30"
+              >
+                <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+              </svg>
+              <p class="mt-4 text-lg font-bold">Você ainda não avaliou nenhum título.</p>
+              <p class="mt-1 max-w-[42ch] text-sm text-base-content/60">
+                Depois de assistir, dê uma nota para ajudar o CineVee a entender melhor seu gosto.
+              </p>
+              <div class="mt-6 flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <a
+                  href="/perfil/assistidos"
+                  class="btn btn-primary min-h-12 rounded-full px-8"
+                >
+                  Ver assistidos
+                </a>
+                <a
+                  href="/descobrir"
+                  class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-8"
+                >
+                  Descobrir títulos
+                </a>
+              </div>
+            </div>
+
+            <p
+              id="ratings-status"
+              role="status"
+              aria-live="polite"
+              style="display: none"
+              class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm"
+            />
+
+            <ul
+              id="ratings-grid"
+              aria-label="Títulos avaliados"
+              class="mt-6 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+            >
+              {
+                items.map((item) => {
+                  const posterUrl = buildPosterUrl(item.posterPath);
+                  const label = typeLabel(item.mediaType);
+                  const review = typeof item.reviewText === "string" ? item.reviewText : null;
+                  const hasReview = review !== null && review.trim() !== "";
+                  // "Ler mais" só para opiniões longas (curtas exibem tudo).
+                  const longReview = hasReview && (review as string).length > 180;
+                  return (
+                    <li data-rating-card data-tmdb-id={item.tmdbId} data-media-type={item.mediaType} data-has-review={hasReview ? "true" : "false"}>
+                      <article class="relative">
+                        <a
+                          href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                          class="cinevee-card group block rounded-xl"
+                          aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}, nota ${item.rating} de 5`}
+                        >
+                          {
+                            posterUrl ? (
+                              <img
+                                src={posterUrl}
+                                alt={`Pôster de ${item.title}`}
+                                width="500"
+                                height="750"
+                                loading="lazy"
+                                class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                              />
+                            ) : (
+                              <div class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                                <svg
+                                  aria-hidden="true"
+                                  class="h-10 w-10 text-white/25"
+                                  viewBox="0 0 24 24"
+                                  fill="currentColor"
+                                >
+                                  <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                </svg>
+                              </div>
+                            )
+                          }
+                          <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                            {item.title}
+                          </p>
+                          <p class="mt-0.5 flex items-center gap-1.5 px-0.5 text-xs text-base-content/60">
+                            {item.year && <span>{item.year}</span>}
+                            {item.year && <span aria-hidden="true"> · </span>}
+                            <span>{label}</span>
+                          </p>
+                          <p class="mt-1 flex items-center gap-1 px-0.5" aria-hidden="true">
+                            {
+                              [1, 2, 3, 4, 5].map((n) => (
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  class={n <= item.rating ? "fill-amber-400 text-amber-400" : "fill-transparent text-base-content/30"}
+                                  fill="currentColor"
+                                  stroke="currentColor"
+                                  stroke-width="1.5"
+                                  stroke-linejoin="round"
+                                >
+                                  <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                </svg>
+                              ))
+                            }
+                          </p>
+                        </a>
+                        {
+                          hasReview && (
+                            <div data-review-preview class="mt-2 rounded-xl border border-base-300/60 bg-base-200/40 px-3 py-2">
+                              <p data-review-text class="cinevee-review-text line-clamp-4 text-sm leading-6 text-base-content/80">
+                                {review}
+                              </p>
+                              {
+                                longReview && (
+                                  <button
+                                    type="button"
+                                    data-review-toggle
+                                    aria-expanded="false"
+                                    class="inline-flex min-h-12 items-center rounded-lg px-1 text-xs font-semibold text-primary underline-offset-4 hover:underline"
+                                  >
+                                    Ler mais
+                                  </button>
+                                )
+                              }
+                            </div>
+                          )
+                        }
+                        <div class="mt-1">
+                          <button
+                            type="button"
+                            data-review-edit
+                            class:list={[
+                              "inline-flex min-h-12 items-center rounded-lg px-1 underline-offset-4 hover:underline",
+                              hasReview
+                                ? "text-xs text-base-content/60 hover:text-base-content"
+                                : "text-xs font-medium text-base-content/50 hover:text-primary",
+                            ]}
+                          >
+                            {hasReview ? "Editar opinião" : "Adicionar opinião"}
+                          </button>
+                        </div>
+                        <div data-review-editor-wrap class="hidden">
+                          <ReviewEditor
+                            tmdbId={item.tmdbId}
+                            mediaType={item.mediaType}
+                            value={review}
+                            editorId={`ratings-${item.mediaType}-${item.tmdbId}`}
+                            showCancel
+                            hidden={false}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          data-rating-remove
+                          aria-label={hasReview ? `Remover avaliação e opinião de ${item.title} (mantém em Assistidos)` : `Remover avaliação de ${item.title} (mantém em Assistidos)`}
+                          title={hasReview ? "Remover esta avaliação e sua opinião?" : "Remover avaliação"}
+                          class="absolute right-1.5 top-1.5 flex min-h-12 min-w-12 items-center justify-center rounded-full border border-white/15 bg-black/55 text-red-300/90 backdrop-blur-sm transition-colors duration-200 hover:border-red-800/50 hover:bg-red-950/70 hover:text-red-200"
+                        >
+                          <svg
+                            aria-hidden="true"
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M4 7h16" />
+                            <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            <path d="M6.5 7l1 13h9l1-13" />
+                          </svg>
+                        </button>
+                      </article>
+                    </li>
+                  );
+                })
+              }
+            </ul>
+          </>
+        )
+      }
+    </ProfileShell>
+  </main>
+</Layout>
+
+<script>
+  // Avaliações: remover sem reload (DELETE /api/ratings) + opiniões inline
+  // (editor compartilhado ReviewEditor via PATCH). Preview com "Ler mais /
+  // Ler menos" no próprio card, sem navegar. Nenhum user_id no browser;
+  // texto sempre via textContent (nunca HTML) + `cinevee-review-text`.
+  (function () {
+    var grid = document.getElementById("ratings-grid") as HTMLElement;
+    var empty = document.getElementById("ratings-empty");
+    var status = document.getElementById("ratings-status");
+    if (!(grid instanceof HTMLElement)) return;
+
+    function showError() {
+      if (status instanceof HTMLElement) {
+        status.textContent = "Não foi possível remover sua avaliação. Tente de novo.";
+        status.style.display = "";
+      }
+    }
+
+    function hideError() {
+      if (status instanceof HTMLElement) status.style.display = "none";
+    }
+
+    function findCard(tmdbId: number, mediaType: string) {
+      var cards = grid.querySelectorAll("[data-rating-card]");
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        if (
+          card instanceof HTMLElement &&
+          Number(card.getAttribute("data-tmdb-id")) === tmdbId &&
+          card.getAttribute("data-media-type") === mediaType
+        ) {
+          return card;
+        }
+      }
+      return null;
+    }
+
+    function cardKey(card: HTMLElement) {
+      var tmdbId = Number(card.getAttribute("data-tmdb-id"));
+      var mediaType = card.getAttribute("data-media-type");
+      if (!Number.isInteger(tmdbId) || tmdbId <= 0 || (mediaType !== "movie" && mediaType !== "tv")) {
+        return null;
+      }
+      return { tmdbId: tmdbId, mediaType: mediaType };
+    }
+
+    function paintEditButton(card: HTMLElement, hasReview: boolean) {
+      var edit = card.querySelector("[data-review-edit]");
+      if (!(edit instanceof HTMLButtonElement)) return;
+      edit.textContent = hasReview ? "Editar opinião" : "Adicionar opinião";
+      edit.classList.toggle("text-base-content/60", hasReview);
+      edit.classList.toggle("hover:text-base-content", hasReview);
+      edit.classList.toggle("font-medium", !hasReview);
+      edit.classList.toggle("text-base-content/50", !hasReview);
+      edit.classList.toggle("hover:text-primary", !hasReview);
+    }
+
+    function setEditorOpen(card: HTMLElement, open: boolean) {
+      var wrap = card.querySelector("[data-review-editor-wrap]");
+      var preview = card.querySelector("[data-review-preview]");
+      var edit = card.querySelector("[data-review-edit]");
+      if (wrap instanceof HTMLElement) wrap.classList.toggle("hidden", !open);
+      if (preview instanceof HTMLElement) preview.classList.toggle("hidden", open);
+      if (edit instanceof HTMLButtonElement) edit.classList.toggle("hidden", open);
+      if (open) {
+        var textarea = wrap instanceof HTMLElement ? wrap.querySelector("textarea") : null;
+        if (textarea instanceof HTMLTextAreaElement) textarea.focus();
+      }
+    }
+
+    // Cria/atualiza/remove o preview após save/remove (texto via
+    // textContent — nunca HTML). Retorna se há opinião agora.
+    function syncPreview(card: HTMLElement, text: string) {
+      var has = typeof text === "string" && text.trim() !== "";
+      var preview = card.querySelector("[data-review-preview]");
+      if (!has) {
+        if (preview instanceof HTMLElement) preview.remove();
+        card.setAttribute("data-has-review", "false");
+        paintEditButton(card, false);
+        return false;
+      }
+      if (preview instanceof HTMLElement) {
+        var p = preview.querySelector("[data-review-text]");
+        if (p) {
+          p.textContent = text;
+          p.classList.add("line-clamp-4");
+        }
+        var toggle = preview.querySelector("[data-review-toggle]");
+        if (toggle instanceof HTMLButtonElement) {
+          toggle.textContent = "Ler mais";
+          toggle.setAttribute("aria-expanded", "false");
+          toggle.classList.toggle("hidden", text.length <= 180);
+        } else if (text.length > 180) {
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.setAttribute("data-review-toggle", "");
+          btn.setAttribute("aria-expanded", "false");
+          btn.className =
+            "inline-flex min-h-12 items-center rounded-lg px-1 text-xs font-semibold text-primary underline-offset-4 hover:underline";
+          btn.textContent = "Ler mais";
+          preview.appendChild(btn);
+        }
+      } else {
+        var box = document.createElement("div");
+        box.setAttribute("data-review-preview", "");
+        box.className = "mt-2 rounded-xl border border-base-300/60 bg-base-200/40 px-3 py-2";
+        var para = document.createElement("p");
+        para.setAttribute("data-review-text", "");
+        para.className = "cinevee-review-text line-clamp-4 text-sm leading-6 text-base-content/80";
+        para.textContent = text;
+        box.appendChild(para);
+        if (text.length > 180) {
+          var more = document.createElement("button");
+          more.type = "button";
+          more.setAttribute("data-review-toggle", "");
+          more.setAttribute("aria-expanded", "false");
+          more.className =
+            "inline-flex min-h-12 items-center rounded-lg px-1 text-xs font-semibold text-primary underline-offset-4 hover:underline";
+          more.textContent = "Ler mais";
+          box.appendChild(more);
+        }
+        var editBtn = card.querySelector("[data-review-edit]");
+        var wrap = card.querySelector("[data-review-editor-wrap]");
+        var anchor = wrap instanceof HTMLElement ? wrap : editBtn;
+        if (anchor instanceof Element && anchor.parentNode) {
+          anchor.parentNode.insertBefore(box, anchor);
+        } else {
+          card.appendChild(box);
+        }
+      }
+      card.setAttribute("data-has-review", "true");
+      paintEditButton(card, true);
+      return true;
+    }
+
+    grid.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof Element)) return;
+      var card = target.closest("[data-rating-card]");
+      if (!(card instanceof HTMLElement)) return;
+      var key = cardKey(card);
+      if (!key) {
+        showError();
+        return;
+      }
+
+      // Ler mais / Ler menos (expande no próprio card).
+      var toggle = target.closest("[data-review-toggle]");
+      if (toggle instanceof HTMLButtonElement) {
+        var text = card.querySelector("[data-review-text]");
+        var expanded = toggle.getAttribute("aria-expanded") === "true";
+        if (text) text.classList.toggle("line-clamp-4", expanded);
+        toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+        toggle.textContent = expanded ? "Ler mais" : "Ler menos";
+        return;
+      }
+
+      // Editar/Adicionar opinião (editor inline, sem navegar).
+      var edit = target.closest("[data-review-edit]");
+      if (edit instanceof HTMLButtonElement) {
+        hideError();
+        setEditorOpen(card, true);
+        return;
+      }
+
+      var button = target.closest("[data-rating-remove]");
+      if (!(button instanceof HTMLButtonElement)) return;
+
+      // Com opinião, a remoção destrói o texto: confirmação explícita.
+      if (card.getAttribute("data-has-review") === "true") {
+        if (!window.confirm("Remover esta avaliação e sua opinião?")) return;
+      }
+
+      hideError();
+      button.setAttribute("disabled", "");
+      button.classList.add("opacity-50");
+
+      fetch("/api/ratings", {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tmdbId: key.tmdbId, mediaType: key.mediaType }),
+      })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(function () {
+          if (!card) return;
+          card.remove();
+          if (empty instanceof HTMLElement && grid.querySelectorAll("[data-rating-card]").length === 0) {
+            empty.style.display = "";
+          }
+        })
+        .catch(function () {
+          if (!button) return;
+          button.removeAttribute("disabled");
+          button.classList.remove("opacity-50");
+          showError();
+        });
+    });
+
+    // Editor compartilhado avisa via eventos: sincroniza o card sem reload.
+    window.addEventListener("cinevee:review-saved", function (event) {
+      var detail = event instanceof CustomEvent ? event.detail : null;
+      if (!detail) return;
+      var card = findCard(Number(detail.tmdbId), detail.mediaType);
+      if (!card) return;
+      var text = typeof detail.reviewText === "string" ? detail.reviewText : "";
+      syncPreview(card, text);
+      // A copy do botão de remover (title) acompanha a existência da
+      // opinião; o aria-label com o título vem do servidor.
+      setEditorOpen(card, false);
+      var remove = card.querySelector("[data-rating-remove]");
+      if (remove instanceof HTMLButtonElement) {
+        remove.setAttribute(
+          "title",
+          text.trim() !== "" ? "Remover esta avaliação e sua opinião?" : "Remover avaliação",
+        );
+      }
+    });
+
+    window.addEventListener("cinevee:review-removed", function (event) {
+      var detail = event instanceof CustomEvent ? event.detail : null;
+      if (!detail) return;
+      var card = findCard(Number(detail.tmdbId), detail.mediaType);
+      if (!card) return;
+      syncPreview(card, "");
+      var remove = card.querySelector("[data-rating-remove]");
+      if (remove instanceof HTMLButtonElement) {
+        remove.setAttribute("title", "Remover avaliação");
+      }
+    });
+
+    window.addEventListener("cinevee:review-cancelled", function (event) {
+      var detail = event instanceof CustomEvent ? event.detail : null;
+      if (!detail) return;
+      var card = findCard(Number(detail.tmdbId), detail.mediaType);
+      if (!card) return;
+      setEditorOpen(card, false);
+    });
+  })();
+</script>

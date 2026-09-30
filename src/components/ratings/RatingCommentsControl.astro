@@ -1,0 +1,56 @@
+---
+/**
+ * Controle de comentários em avaliação (Etapa 19).
+ * Reutilizado no feed e no perfil público (SSR + cards client-side via
+ * builder em /scripts/rating-comments.js).
+ *
+ * Estado fechado: botão "Ver N comentários" (ou "Comentar" quando 0).
+ * A thread carrega lazy no primeiro expand (GET /api/ratings/comments)
+ * e é montada via DOM (textContent — sem HTML cru, sem UUID).
+ * O dono da rating nunca vê composer (vem do GET: isOwner/canComment),
+ * mas pode moderar (Remover). Anon lê; comentar pede login.
+ */
+interface Props {
+  username: string;
+  mediaType: "movie" | "tv";
+  tmdbId: number;
+  commentCount: number;
+  commentsEnabled: boolean;
+}
+
+const { username, mediaType, tmdbId, commentCount, commentsEnabled } = Astro.props;
+const count = Number.isSafeInteger(commentCount) && commentCount >= 0 ? commentCount : 0;
+const panelId = `rc-${username}-${mediaType}-${tmdbId}`;
+const toggleLabel = count === 0 ? "Comentar" : `Ver ${count} ${count === 1 ? "comentário" : "comentários"}`;
+---
+
+<div
+  data-rating-comments
+  data-rating-owner-username={username}
+  data-rating-media-type={mediaType}
+  data-rating-tmdb-id={tmdbId}
+  data-count={count}
+  data-enabled={commentsEnabled ? "true" : "false"}
+>
+  <button
+    type="button"
+    data-role="comments-toggle"
+    aria-expanded="false"
+    aria-controls={panelId}
+    aria-label={toggleLabel}
+    class="inline-flex min-h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm transition-opacity hover:bg-base-200"
+  >
+    <span data-role="comments-glyph" aria-hidden="true" class="text-base text-base-content/60">
+      💬
+    </span>
+    <span data-role="comments-count" class="font-semibold tabular-nums text-base-content/80">
+      {count}
+    </span>
+    <span data-role="comments-label" class="text-base-content/60">
+      {toggleLabel}
+    </span>
+  </button>
+  <div data-role="comments-panel" id={panelId} hidden class="mt-1">
+    <p data-role="comments-status" role="status" class="py-1 text-sm text-base-content/60"></p>
+  </div>
+</div>

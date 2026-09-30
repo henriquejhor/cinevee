@@ -1,0 +1,40 @@
+---
+/**
+ * DiscoveryOptionTemplate — botão de opção do questionário.
+ *
+ * `<template>` clonado pelo controlador do fluxo para cada opção.
+ * Valores via textContent/atributos (sem innerHTML para dados); o ícone
+ * vem do mapa estático de SVGs. Seleção via aria-pressed + CSS.
+ * Layout (linha, coluna, chip) varia por `[data-kind]` no container.
+ */
+---
+
+<template id="discovery-option-template">
+  <button
+    type="button"
+    data-option
+    aria-pressed="false"
+    class="flex min-h-14 w-full items-center gap-4 rounded-2xl border border-base-300 bg-base-200 px-5 py-4 text-left transition-all duration-200 active:scale-[0.99]"
+  >
+    <span data-option-icon class="discovery-option-icon shrink-0"></span>
+    <span data-option-text class="min-w-0 flex-1">
+      <span data-option-label class="block text-base font-semibold leading-snug"></span>
+      <span data-option-desc class="mt-0.5 block text-sm font-normal leading-snug text-base-content/60"></span>
+    </span>
+    <svg
+      data-option-check
+      aria-hidden="true"
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="hidden shrink-0 text-primary"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  </button>
+</template>

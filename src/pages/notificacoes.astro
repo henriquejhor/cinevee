@@ -1,0 +1,489 @@
+---
+/**
+ * /notificacoes — inbox privada (Etapa 21). Protegida por login:
+ * deslogado → /entrar?next=/notificacoes.
+ *
+ * SSR da primeira página (GET nunca marca como lida). O script
+ * client-side marca as visíveis como lidas, trata Carregar mais
+ * (append + dedupe + mark) e Marcar todas (badge via CustomEvent).
+ */
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+import NotificationCard from "../components/notifications/NotificationCard.astro";
+import {
+  getMyNotificationsPage,
+  getMyUnreadNotificationCount,
+  getNotificationsSession,
+} from "../lib/notifications/service";
+import { NOTIFICATION_PAGE_SIZE } from "../lib/notifications/types";
+
+export const prerender = false;
+
+const session = await getNotificationsSession(Astro.request, Astro.cookies);
+
+if (!session) {
+  return Astro.redirect("/entrar?next=/notificacoes", 303);
+}
+
+let loadError = false;
+let items: Awaited<ReturnType<typeof getMyNotificationsPage>>["items"] = [];
+let hasMore = false;
+let unreadTotal = 0;
+
+try {
+  const [page, unread] = await Promise.all([
+    getMyNotificationsPage(session, 1, NOTIFICATION_PAGE_SIZE),
+    getMyUnreadNotificationCount(session),
+  ]);
+  items = page.items;
+  hasMore = page.hasMore;
+  unreadTotal = unread;
+} catch {
+  loadError = true;
+}
+---
+
+<Layout title="Notificações — CineVee" description="Interações recentes com seu perfil e suas avaliações." noindex>
+  <AppHeader />
+  <main class="mx-auto w-full max-w-2xl px-4 pb-32 pt-10 sm:px-6 sm:pt-14">
+    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Sua conta</p>
+    <h1 class="mt-3 text-3xl font-extrabold tracking-tight">Notificações</h1>
+    <p class="mt-1 text-sm text-base-content/60">
+      Interações recentes com seu perfil e suas avaliações.
+    </p>
+
+    <p id="notifications-status" role="status" aria-live="polite" style="display: none" class="mt-4 rounded-2xl border px-4 py-3 text-sm"></p>
+
+    {
+      loadError ? (
+        <div class="mt-6 rounded-2xl border border-base-300 bg-base-200/40 px-5 py-8 text-center">
+          <p class="text-sm font-semibold">Não foi possível carregar suas notificações agora.</p>
+          <a href="/notificacoes" class="btn btn-primary mt-4 min-h-12 rounded-full px-8 text-sm font-semibold">
+            Tentar novamente
+          </a>
+        </div>
+      ) : (
+        <div>
+          <div class="mt-4">
+            <button
+              id="notifications-mark-all"
+              type="button"
+              disabled={unreadTotal === 0}
+              class="btn btn-outline min-h-12 rounded-full px-6 text-sm"
+            >
+              Marcar todas como lidas
+            </button>
+          </div>
+          {
+            items.length === 0 ? (
+              <div class="mt-6 rounded-2xl border border-base-300/60 bg-base-200/40 px-5 py-8 text-center">
+                <p class="text-sm font-semibold">Nenhuma notificação ainda.</p>
+                <p class="mt-1 text-sm text-base-content/60">
+                  Quando alguém seguir você ou interagir com suas avaliações, você verá por aqui.
+                </p>
+              </div>
+            ) : (
+              <ul id="notifications-list" aria-label="Notificações" class="mt-4 flex flex-col gap-3">
+                {items.map((item) => <NotificationCard item={item} />)}
+              </ul>
+            )
+          }
+          {
+            hasMore && (
+              <div class="mt-6 flex flex-col items-center gap-3">
+                <button
+                  id="notifications-more"
+                  type="button"
+                  data-next-page="2"
+                  class="btn btn-outline min-h-12 rounded-full px-10"
+                >
+                  Carregar mais
+                </button>
+                <p id="notifications-more-status" role="status" class="min-h-5 text-xs text-base-content/60"></p>
+              </div>
+            )
+          }
+        </div>
+      )
+    }
+  </main>
+</Layout>
+
+<script>
+  // Inbox client-side: sem listeners por card (só 2 botões + mark inicial).
+  // Tudo via textContent/createElement (sem HTML cru); badge via evento.
+  (function () {
+    // CDN falhou: remove o <img> quebrado e deixa o fallback visível.
+    // Listener único em captura (error não borbulha); sem listener por card.
+    document.addEventListener("error", function (event) {
+      var target = event.target;
+      if (!(target instanceof HTMLImageElement)) return;
+      if (target.getAttribute("data-role") !== "notification-poster") return;
+      target.remove();
+    }, true);
+
+    var list = document.getElementById("notifications-list") as HTMLElement | null;
+    var markAll = document.getElementById("notifications-mark-all") as HTMLButtonElement | null;
+    var more = document.getElementById("notifications-more") as HTMLButtonElement | null;
+    var moreStatus = document.getElementById("notifications-more-status") as HTMLElement | null;
+    var status = document.getElementById("notifications-status") as HTMLElement | null;
+
+    function announce(message: string) {
+      if (status) {
+        status.textContent = message;
+        status.style.display = "";
+      }
+    }
+
+    function emitBadge(unreadCount: number) {
+      document.dispatchEvent(
+        new CustomEvent("cinevee:notifications-updated", { detail: { unreadCount: unreadCount } }),
+      );
+    }
+
+    function paintRead(root: HTMLElement) {
+      root.setAttribute("data-unread", "false");
+      root.classList.remove("border-primary/40", "bg-primary/5");
+      root.classList.add("border-base-300/60", "bg-base-200/40");
+      var dot = root.querySelector('[data-role="notification-dot"]');
+      if (dot instanceof HTMLElement) {
+        dot.classList.remove("bg-primary");
+        dot.classList.add("bg-transparent");
+      }
+    }
+
+    function visibleUnreadIds(): number[] {
+      if (!list) return [];
+      var nodes = list.querySelectorAll('[data-notification-id][data-unread="true"]');
+      var ids: number[] = [];
+      for (var i = 0; i < nodes.length; i++) {
+        var id = Number(nodes[i].getAttribute("data-notification-id"));
+        if (Number.isSafeInteger(id) && id >= 1 && ids.indexOf(id) === -1) ids.push(id);
+      }
+      return ids.slice(0, 24);
+    }
+
+    function markIds(ids: number[], onDone: (unread: number) => void) {
+      if (ids.length === 0) return;
+      fetch("/api/notifications/read", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationIds: ids }),
+      })
+        .then(function (res) {
+          if (res.status === 401) {
+            window.location.href = "/entrar?next=" + encodeURIComponent("/notificacoes");
+            return null;
+          }
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (data: unknown) {
+          if (!data || typeof data !== "object") return;
+          var unread = (data as Record<string, unknown>).unreadCount;
+          if (typeof unread !== "number" || !Number.isSafeInteger(unread)) return;
+          if (list) {
+            for (var i = 0; i < ids.length; i++) {
+              var node = list.querySelector('[data-notification-id="' + ids[i] + '"]');
+              if (node instanceof HTMLElement) paintRead(node);
+            }
+          }
+          if (markAll instanceof HTMLButtonElement && unread === 0) {
+            markAll.setAttribute("disabled", "");
+          }
+          emitBadge(unread);
+          onDone(unread);
+        })
+        .catch(function () {
+          announce("Não foi possível atualizar suas notificações.");
+        });
+    }
+
+    function initialsFor(name: string | null): string {
+      var parts = String(name ?? "").trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0) return "?";
+      var first = parts[0] ? parts[0].charAt(0) : "";
+      var last = parts.length > 1 && parts[parts.length - 1] ? parts[parts.length - 1].charAt(0) : "";
+      return (first + last).toUpperCase() || "?";
+    }
+
+    function relativeTime(iso: string): string {
+      var then = Date.parse(iso);
+      if (Number.isNaN(then)) return "";
+      var diff = Math.max(0, Math.floor((Date.now() - then) / 1000));
+      if (diff < 60) return "agora mesmo";
+      var minutes = Math.floor(diff / 60);
+      if (minutes < 60) return "há " + minutes + " min";
+      var hours = Math.floor(minutes / 60);
+      if (hours < 24) return "há " + hours + " h";
+      var days = Math.floor(hours / 24);
+      if (days === 1) return "há 1 dia";
+      if (days < 7) return "há " + days + " dias";
+      var weeks = Math.floor(days / 7);
+      if (weeks < 5) return weeks === 1 ? "há 1 sem" : "há " + weeks + " sem";
+      var months = Math.floor(days / 30);
+      if (months < 12) return months === 1 ? "há 1 mês" : "há " + months + " meses";
+      var years = Math.floor(days / 365);
+      return years === 1 ? "há 1 ano" : "há " + years + " anos";
+    }
+
+    function el(tag: string, className: string, text?: string): HTMLElement {
+      var node = document.createElement(tag);
+      if (className) node.className = className;
+      if (typeof text === "string") node.textContent = text;
+      return node;
+    }
+
+    function actorNameOf(item: Record<string, unknown>): string {
+      var actor = (item.actor ?? {}) as Record<string, unknown>;
+      if (actor.isPrivate === true) return "Usuário privado";
+      if (typeof actor.displayName === "string" && actor.displayName.trim()) {
+        return actor.displayName.trim();
+      }
+      if (typeof actor.username === "string" && actor.username) return "@" + actor.username;
+      return "Alguém";
+    }
+
+    // Replica o NotificationCard SSR (mesmas classes/estados, sem HTML cru).
+    function buildCard(item: Record<string, unknown>): HTMLElement | null {
+      var id = item.notificationId;
+      var type = item.type;
+      if (typeof id !== "number" || !Number.isSafeInteger(id)) return null;
+      if (type !== "follow" && type !== "rating_like" && type !== "rating_comment" && type !== "comment_reply") return null;
+      var actor = ((item.actor ?? {}) as Record<string, unknown>);
+      var isPrivate = actor.isPrivate === true;
+      var username = typeof actor.username === "string" && !isPrivate ? actor.username : null;
+      var name = actorNameOf(item);
+      var title = (item.title ?? null) as Record<string, unknown> | null;
+      var titleHref =
+        title && (title.mediaType === "movie" || title.mediaType === "tv") && typeof title.tmdbId === "number"
+          ? "/titulo/" + title.mediaType + "/" + title.tmdbId
+          : null;
+      var action =
+        type === "follow"
+          ? "começou a seguir você."
+          : type === "rating_like"
+            ? "curtiu sua avaliação" + (typeof title?.title === "string" ? " de " + title.title : ".")
+            : type === "rating_comment"
+              ? "comentou na sua avaliação" + (typeof title?.title === "string" ? " de " + title.title : ".")
+              : "respondeu ao seu comentário" + (typeof title?.title === "string" ? " sobre " + title.title : ".");
+      var previewText =
+        type === "rating_comment" && typeof item.commentText === "string" && item.commentText
+          ? item.commentText
+          : type === "comment_reply" && typeof item.replyText === "string" && item.replyText
+            ? item.replyText
+            : null;
+
+      var li = document.createElement("li");
+      li.setAttribute("data-notification-id", String(id));
+      li.setAttribute("data-unread", "true");
+      li.className = "flex gap-3 rounded-2xl border border-primary/40 bg-primary/5 p-3";
+
+      var dot = el("span", "mt-2 h-2 w-2 shrink-0 rounded-full bg-primary");
+      dot.setAttribute("data-role", "notification-dot");
+      dot.setAttribute("aria-hidden", "true");
+      li.appendChild(dot);
+
+      if (username) {
+        var avatarLink = document.createElement("a");
+        avatarLink.href = "/u/" + username;
+        avatarLink.setAttribute("aria-label", "Ver perfil");
+        avatarLink.className =
+          "flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-sm font-extrabold text-white";
+        var avatarUrl = typeof actor.avatarUrl === "string" ? actor.avatarUrl : null;
+        if (avatarUrl) {
+          var img = document.createElement("img");
+          img.src = avatarUrl;
+          img.alt = "";
+          img.width = 96;
+          img.height = 96;
+          img.loading = "lazy";
+          img.setAttribute("aria-hidden", "true");
+          img.className = "h-full w-full object-cover";
+          avatarLink.appendChild(img);
+        } else {
+          var fb = el("span", "flex h-full w-full items-center justify-center", initialsFor(name));
+          fb.setAttribute("aria-hidden", "true");
+          avatarLink.appendChild(fb);
+        }
+        li.appendChild(avatarLink);
+      } else {
+        var generic = el("span", "flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base-300 text-sm font-extrabold text-base-content/60", initialsFor(isPrivate ? null : name));
+        generic.setAttribute("aria-hidden", "true");
+        li.appendChild(generic);
+      }
+
+      var body = el("div", "min-w-0 flex-1");
+      var line = el("p", "break-words text-sm leading-snug");
+      var sr = el("span", "sr-only", "Não lida. ");
+      line.appendChild(sr);
+      if (username) {
+        var nameLink = document.createElement("a");
+        nameLink.href = "/u/" + username;
+        nameLink.className = "font-semibold hover:text-primary";
+        nameLink.textContent = name;
+        line.appendChild(nameLink);
+      } else {
+        line.appendChild(el("span", "font-semibold", name));
+      }
+      line.appendChild(document.createTextNode(" "));
+      line.appendChild(el("span", "text-base-content/80", action));
+      body.appendChild(line);
+
+      if (previewText) {
+        var preview = el("p", "mt-1 line-clamp-3 break-words text-sm leading-6 text-base-content/70", "“" + previewText + "”");
+        preview.setAttribute("data-role", "notification-preview");
+        body.appendChild(preview);
+      }
+
+      var meta = el("p", "mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60");
+      var createdAt = typeof item.createdAt === "string" ? item.createdAt : "";
+      var time = document.createElement("time");
+      time.setAttribute("datetime", createdAt);
+      time.textContent = relativeTime(createdAt);
+      meta.appendChild(time);
+      if (titleHref) {
+        var titleLink = document.createElement("a");
+        titleLink.href = titleHref;
+        titleLink.className = "font-semibold text-primary underline-offset-4 hover:underline";
+        titleLink.textContent = "Ver título";
+        meta.appendChild(titleLink);
+        var mine = document.createElement("a");
+        mine.href = "/perfil/avaliacoes";
+        mine.className = "underline-offset-4 hover:underline";
+        mine.textContent = "Minhas avaliações";
+        meta.appendChild(mine);
+      }
+      body.appendChild(meta);
+      li.appendChild(body);
+
+      var poster = title && typeof title.posterUrl === "string" && title.posterUrl ? title.posterUrl : null;
+      if (title && titleHref) {
+        var posterLink = document.createElement("a");
+        posterLink.href = titleHref;
+        posterLink.setAttribute("aria-hidden", "true");
+        posterLink.tabIndex = -1;
+        posterLink.className = "relative block w-12 shrink-0 self-start overflow-hidden rounded-lg bg-base-300/60";
+        var posterFallback = el("span", "flex aspect-[2/3] w-full items-center justify-center text-lg font-extrabold text-base-content/40", "★");
+        posterFallback.setAttribute("data-role", "poster-fallback");
+        posterFallback.setAttribute("aria-hidden", "true");
+        posterLink.appendChild(posterFallback);
+        if (poster) {
+          var posterImg = document.createElement("img");
+          posterImg.src = poster;
+          posterImg.alt = "";
+          posterImg.width = 96;
+          posterImg.height = 144;
+          posterImg.loading = "lazy";
+          posterImg.setAttribute("data-role", "notification-poster");
+          posterImg.className = "absolute inset-0 aspect-[2/3] h-full w-full object-cover";
+          posterLink.appendChild(posterImg);
+        }
+        li.appendChild(posterLink);
+      }
+      return li;
+    }
+
+    function knownIds(): Set<number> {
+      var set = new Set<number>();
+      if (!list) return set;
+      var nodes = list.querySelectorAll("[data-notification-id]");
+      for (var i = 0; i < nodes.length; i++) {
+        var id = Number(nodes[i].getAttribute("data-notification-id"));
+        if (Number.isSafeInteger(id) && id >= 1) set.add(id);
+      }
+      return set;
+    }
+
+    // Marca as visíveis como lidas logo após o load (GET nunca muta).
+    var initial = visibleUnreadIds();
+    if (initial.length > 0) {
+      markIds(initial, function () {});
+    }
+
+    if (markAll instanceof HTMLButtonElement) {
+      markAll.addEventListener("click", function () {
+        if (!(markAll instanceof HTMLButtonElement) || markAll.hasAttribute("disabled")) return;
+        markAll.setAttribute("disabled", "");
+        fetch("/api/notifications/read-all", { method: "POST", credentials: "same-origin" })
+          .then(function (res) {
+            if (res.status === 401) {
+              window.location.href = "/entrar?next=" + encodeURIComponent("/notificacoes");
+              return null;
+            }
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json();
+          })
+          .then(function (data: unknown) {
+            if (!data || typeof data !== "object") return;
+            var unread = (data as Record<string, unknown>).unreadCount;
+            if (typeof unread !== "number") return;
+            if (list) {
+              var nodes = list.querySelectorAll('[data-notification-id][data-unread="true"]');
+              for (var i = 0; i < nodes.length; i++) {
+                if (nodes[i] instanceof HTMLElement) paintRead(nodes[i] as HTMLElement);
+              }
+            }
+            emitBadge(unread);
+            announce("Todas as notificações foram marcadas como lidas.");
+          })
+          .catch(function () {
+            if (markAll instanceof HTMLButtonElement) markAll.removeAttribute("disabled");
+            announce("Não foi possível marcar todas como lidas.");
+          });
+      });
+    }
+
+    if (more instanceof HTMLButtonElement && list) {
+      more.addEventListener("click", function () {
+        if (!(more instanceof HTMLButtonElement) || more.hasAttribute("disabled")) return;
+        var next = Number(more.getAttribute("data-next-page") || "2");
+        if (!Number.isSafeInteger(next) || next < 1) return;
+        more.setAttribute("disabled", "");
+        if (moreStatus) moreStatus.textContent = "Carregando…";
+        fetch("/api/notifications?page=" + next + "&limit=24", { credentials: "same-origin" })
+          .then(function (res) {
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json();
+          })
+          .then(function (data: unknown) {
+            if (!data || typeof data !== "object") throw new Error("payload inválido");
+            var body = data as Record<string, unknown>;
+            var rawItems = Array.isArray(body.items) ? body.items : [];
+            var known = knownIds();
+            var added: number[] = [];
+            for (var i = 0; i < rawItems.length; i++) {
+              var raw = rawItems[i];
+              if (typeof raw !== "object" || raw === null) continue;
+              var record = raw as Record<string, unknown>;
+              var nid = record.notificationId;
+              if (typeof nid !== "number" || !Number.isSafeInteger(nid) || known.has(nid)) continue;
+              var card = buildCard(record);
+              if (!card) continue;
+              known.add(nid);
+              if (list instanceof HTMLElement) list.appendChild(card);
+              added.push(nid);
+            }
+            var hasMorePages = body.hasMore === true;
+            if (!(more instanceof HTMLButtonElement)) return;
+            if (hasMorePages) {
+              more.setAttribute("data-next-page", String(next + 1));
+              more.removeAttribute("disabled");
+              if (moreStatus) moreStatus.textContent = "";
+            } else {
+              more.remove();
+              if (moreStatus) moreStatus.textContent = "Você viu todas as notificações.";
+            }
+            // Marca as recém-carregadas como lidas (sem roubar foco).
+            if (added.length > 0) markIds(added, function () {});
+          })
+          .catch(function () {
+            if (more instanceof HTMLButtonElement) more.removeAttribute("disabled");
+            if (moreStatus) moreStatus.textContent = "Não foi possível carregar. Tente de novo.";
+          });
+      });
+    }
+  })();
+</script>

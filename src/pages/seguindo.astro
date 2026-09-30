@@ -1,0 +1,262 @@
+---
+/**
+ * /seguindo — feed de quem o viewer segue (Etapa 17).
+ * Protegida: deslogado → /entrar?next=/seguindo.
+ * SSR página 1 (24) + Carregar mais com dedupe por eventKey (feed deriva
+ * de dados vivos; overlap entre requests nunca duplica cards).
+ * Sem TMDB/IA: snapshots já vêm da RPC. Sem UUID no browser.
+ */
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+import FeedActivityCard from "../components/feed/FeedActivityCard.astro";
+import { getFeedSession, getFollowingFeedPage } from "../lib/feed/service";
+import { FEED_PAGE_SIZE } from "../lib/feed/types";
+
+export const prerender = false;
+
+const ctx = await getFeedSession(Astro.request, Astro.cookies);
+
+if (!ctx) {
+  return Astro.redirect("/entrar?next=%2Fseguindo", 303);
+}
+
+let items: Awaited<ReturnType<typeof getFollowingFeedPage>>["items"] = [];
+let hasMore = false;
+let loadFailed = false;
+
+try {
+  const result = await getFollowingFeedPage(ctx, 1, FEED_PAGE_SIZE);
+  items = result.items;
+  hasMore = result.hasMore;
+} catch (error) {
+  const message = error instanceof Error ? error.message : "erro desconhecido";
+  console.error(`[Feed] Falha em /seguindo (${message}).`);
+  loadFailed = true;
+}
+---
+
+<Layout title="Seguindo — CineVee" description="Atividades recentes de pessoas que você segue." noindex>
+  <AppHeader />
+  <main class="mx-auto w-full max-w-3xl px-4 pb-32 pt-10 sm:px-6 sm:pt-14">
+    <h1 class="text-2xl font-extrabold tracking-tight sm:text-3xl">Seguindo</h1>
+    <p class="mt-1 text-sm text-base-content/60">
+      Atividades recentes de pessoas que você segue.
+    </p>
+
+    {
+      loadFailed ? (
+        <div class="mt-6 rounded-2xl border border-base-300 bg-base-200/60 p-6 text-center">
+          <p class="text-sm font-semibold">Não foi possível carregar o feed agora.</p>
+          <a href="/seguindo" class="btn btn-primary mt-4 min-h-12 rounded-full px-8">
+            Tentar novamente
+          </a>
+        </div>
+      ) : items.length === 0 ? (
+        <div class="mt-6 rounded-2xl border border-base-300 bg-base-200/60 p-6 text-center">
+          <p class="text-sm font-semibold">Nada por aqui ainda.</p>
+          <p class="mt-1 text-sm text-base-content/60">
+            Encontre pessoas e acompanhe o que elas estão avaliando e recomendando.
+          </p>
+          <a
+            href="/buscar?tab=pessoas"
+            class="btn btn-primary mt-4 min-h-12 rounded-full px-8"
+          >
+            Encontrar pessoas
+          </a>
+        </div>
+      ) : (
+        <>
+          <ul
+            id="feed-list"
+            aria-label="Atividades de quem você segue"
+            class="mt-6 flex w-full flex-col gap-3"
+          >
+            {items.map((event) => (
+              <li>
+                <FeedActivityCard event={event} variant="full" />
+              </li>
+            ))}
+          </ul>
+          {
+            hasMore && (
+              <div class="mt-8 flex flex-col items-center gap-3">
+                <button
+                  type="button"
+                  data-feed-more
+                  data-next-page="2"
+                  class="btn btn-outline min-h-12 rounded-full px-10"
+                >
+                  Carregar mais
+                </button>
+                <p role="status" data-feed-more-status class="min-h-5 text-xs text-base-content/60" />
+              </div>
+            )
+          }
+          <p role="status" data-feed-end class="mt-8 text-center text-xs text-base-content/60" style={hasMore ? "display: none" : undefined}>
+            Você chegou ao fim.
+          </p>
+        </>
+      )
+    }
+  </main>
+</Layout>
+
+<template id="feed-card-template">
+  <li>
+    <article
+      data-feed-card
+      class="cinevee-card flex gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3"
+    >
+      <a
+        data-role="actor-link"
+        href="#"
+        class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-sm font-extrabold text-white"
+      >
+        <img
+          data-role="avatar"
+          alt=""
+          width="80"
+          height="80"
+          loading="lazy"
+          aria-hidden="true"
+          class="h-full w-full object-cover"
+          hidden
+        />
+        <span data-role="initials" aria-hidden="true" class="flex h-full w-full items-center justify-center"></span>
+      </a>
+      <div class="min-w-0 flex-1">
+        <p class="break-words text-sm leading-snug">
+          <a data-role="name" href="#" class="font-semibold hover:text-primary"></a>
+          <span data-role="action" class="text-base-content/70"></span>
+          <a data-role="title-link" href="#" class="font-semibold hover:text-primary"></a><span data-role="action-suffix" class="text-base-content/70"></span>
+        </p>
+        <p class="mt-0.5 flex items-center gap-2 text-xs text-base-content/60">
+          <span data-role="username"></span>
+          <span aria-hidden="true">·</span>
+          <time data-role="time" datetime=""></time>
+        </p>
+        <div class="mt-2 flex gap-3">
+          <a
+            data-role="poster-link"
+            href="#"
+            class="block w-16 shrink-0 overflow-hidden rounded-lg bg-base-300/60 sm:w-20"
+          >
+            <img
+              data-role="poster"
+              alt=""
+              width="160"
+              height="240"
+              loading="lazy"
+              aria-hidden="true"
+              class="aspect-[2/3] h-auto w-full object-cover"
+              hidden
+            />
+            <span
+              data-role="poster-fallback"
+              aria-hidden="true"
+              class="flex aspect-[2/3] w-full items-center justify-center text-xl font-extrabold text-base-content/40"
+              hidden
+            ></span>
+          </a>
+          <div class="min-w-0 flex-1 py-0.5">
+            <p data-role="stars" class="flex items-center gap-1.5" hidden>
+              <span aria-hidden="true" class="text-sm tracking-tight text-warning" data-role="stars-glyph"></span>
+              <span class="sr-only" data-role="stars-label"></span>
+            </p>
+            <p data-role="text" class="mt-1 line-clamp-4 text-sm leading-6 text-base-content/80" hidden></p>
+            <div data-role="like-slot" class="mt-1 -ml-3"></div>
+            <div data-role="comments-slot" class="mt-1 -ml-3"></div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </li>
+</template>
+
+<script is:inline src="/scripts/feed-cards.js"></script>
+<script is:inline src="/scripts/rating-likes.js"></script>
+<script is:inline src="/scripts/rating-comments.js"></script>
+<script>
+  // Feed /seguindo: Carregar mais com dedupe por eventKey (mesmo
+  // aprendizado do Explore — o feed deriva de dados vivos e páginas podem
+  // sofrer overlap). Só texto (sem HTML cru). Nenhum identificador interno.
+  (function () {
+    var moreButton = document.querySelector("[data-feed-more]") as HTMLButtonElement;
+    var list = document.getElementById("feed-list") as HTMLElement;
+    var moreStatus = document.querySelector("[data-feed-more-status]");
+    var endNote = document.querySelector("[data-feed-end]");
+    var template = document.getElementById("feed-card-template");
+    if (!(moreButton instanceof HTMLButtonElement) || !(list instanceof HTMLElement)) return;
+
+    var nextPage = Number(moreButton.getAttribute("data-next-page") ?? "2");
+    var loading = false;
+
+    function seenKeys() {
+      var keys = new Set();
+      list.querySelectorAll("[data-feed-card]").forEach(function (el) {
+        var key = el.getAttribute("data-key");
+        if (key) keys.add(key);
+      });
+      return keys;
+    }
+
+    var cards = (
+      window as Window & {
+        CineVeeFeedCards?: {
+          validItem: (item: unknown) => boolean;
+          buildCard: (template: Element | null, item: unknown) => Node | null;
+        };
+      }
+    ).CineVeeFeedCards;
+    if (!cards) return;
+
+    function setLoading(on: boolean) {
+      loading = on;
+      if (on) {
+        moreButton.setAttribute("disabled", "");
+        moreButton.textContent = "Carregando...";
+      } else {
+        moreButton.removeAttribute("disabled");
+        moreButton.textContent = "Carregar mais";
+      }
+    }
+
+    moreButton.addEventListener("click", function () {
+      if (loading) return;
+      setLoading(true);
+      if (moreStatus) moreStatus.textContent = "";
+      var url = "/api/feed/following?page=" + encodeURIComponent(String(nextPage));
+      fetch(url, { credentials: "same-origin" })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(function (data) {
+          if (!cards) return;
+          var items = data && Array.isArray(data.items) ? data.items : [];
+          var known = seenKeys();
+          for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (!cards.validItem(item)) continue;
+            if (known.has(item.eventKey)) continue;
+            known.add(item.eventKey);
+            var node = cards.buildCard(template, item);
+            if (node) list.appendChild(node);
+          }
+          if (data && data.hasMore === true) {
+            nextPage += 1;
+            setLoading(false);
+          } else {
+            moreButton.remove();
+            if (moreStatus) moreStatus.textContent = "";
+            if (endNote instanceof HTMLElement) endNote.style.display = "";
+          }
+        })
+        .catch(function () {
+          setLoading(false);
+          if (moreStatus) moreStatus.textContent = "Não foi possível carregar mais agora. Tente de novo.";
+        });
+    });
+  })();
+</script>

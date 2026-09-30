@@ -1,0 +1,203 @@
+---
+/**
+ * Card de atividade do feed "Seguindo" (Etapa 17).
+ * Reutilizado na Home (variant="compact") e em /seguindo (variant="full").
+ * Mesma linguagem visual dos cards de pessoa (cinevee-card, DaisyUI).
+ * Todo texto via interpolação Astro (sempre escapado); rótulos
+ * acessíveis usam texto sem tags (hardening Etapa 16).
+ * Rating events trazem controle de curtida (Etapa 18); favorite e
+ * recommendation nunca recebem botão de like.
+ */
+import type { FeedEvent } from "../../lib/feed/types";
+import RatingLikeControl from "../ratings/RatingLikeControl.astro";
+import RatingCommentsControl from "../ratings/RatingCommentsControl.astro";
+
+interface Props {
+  event: FeedEvent;
+  /** compact: prévia ~2 linhas · full: ~4 linhas. */
+  variant?: "compact" | "full";
+}
+
+const { event, variant = "full" } = Astro.props;
+const actorName = event.actor.displayName?.trim() || `@${event.actor.username}`;
+const accessibleName =
+  actorName.replace(/<[^>]*>/g, "").trim() || `@${event.actor.username}`;
+const titleHref = `/titulo/${event.title.mediaType}/${event.title.tmdbId}`;
+const actionText =
+  event.type === "rating"
+    ? "avaliou"
+    : event.type === "recommendation"
+      ? "recomenda"
+      : "adicionou";
+const actionSuffix = event.type === "favorite" ? " aos favoritos" : "";
+
+function initials(value: string): string {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.charAt(0) ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.charAt(0) ?? "") : "";
+  return (first + last).toUpperCase() || "?";
+}
+
+/** "há 2 h" / "há 1 d" — sem biblioteca de datas. */
+function relativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (diffSeconds < 60) return "agora mesmo";
+  const minutes = Math.floor(diffSeconds / 60);
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return days === 1 ? "há 1 dia" : `há ${days} dias`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return weeks === 1 ? "há 1 sem" : `há ${weeks} sem`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return months === 1 ? "há 1 mês" : `há ${months} meses`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? "há 1 ano" : `há ${years} anos`;
+}
+
+const timeLabel = relativeTime(event.activityAt);
+---
+
+<article
+  data-feed-card
+  data-key={event.eventKey}
+  class="cinevee-card flex gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3"
+>
+  <a
+    href={`/u/${event.actor.username}`}
+    aria-label={`Ver perfil de ${accessibleName}`}
+    class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-sm font-extrabold text-white"
+  >
+    {
+      event.actor.avatarUrl ? (
+        <img
+          src={event.actor.avatarUrl}
+          alt=""
+          width="80"
+          height="80"
+          loading="lazy"
+          aria-hidden="true"
+          class="h-full w-full object-cover"
+        />
+      ) : (
+        <span aria-hidden="true" class="flex h-full w-full items-center justify-center">
+          {initials(actorName)}
+        </span>
+      )
+    }
+  </a>
+
+  <div class="min-w-0 flex-1">
+    <p class="break-words text-sm leading-snug">
+      <a
+        href={`/u/${event.actor.username}`}
+        class="font-semibold hover:text-primary"
+      >
+        {actorName}
+      </a>{" "}
+      <span class="text-base-content/70">{actionText}</span>{" "}
+      <a href={titleHref} class="font-semibold hover:text-primary">
+        {event.title.title}
+      </a>
+      {actionSuffix && <span class="text-base-content/70">{actionSuffix}</span>}
+    </p>
+    <p class="mt-0.5 flex items-center gap-2 text-xs text-base-content/60">
+      <span>@{event.actor.username}</span>
+      <span aria-hidden="true">·</span>
+      <time datetime={event.activityAt}>{timeLabel}</time>
+    </p>
+
+    <div class="mt-2 flex gap-3">
+      <a
+        href={titleHref}
+        aria-label={`Ver detalhes de ${event.title.title}`}
+        class="block w-16 shrink-0 overflow-hidden rounded-lg bg-base-300/60 sm:w-20"
+      >
+        {
+          event.title.posterUrl ? (
+            <img
+              src={event.title.posterUrl}
+              alt=""
+              width="160"
+              height="240"
+              loading="lazy"
+              aria-hidden="true"
+              class="aspect-[2/3] h-auto w-full object-cover"
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              class="flex aspect-[2/3] w-full items-center justify-center text-xl font-extrabold text-base-content/40"
+            >
+              {initials(event.title.title)}
+            </span>
+          )
+        }
+      </a>
+
+      <div class="min-w-0 flex-1 py-0.5">
+        {
+          event.type === "rating" && typeof event.rating === "number" && (
+            <p class="flex items-center gap-1.5">
+              <span aria-hidden="true" class="text-sm tracking-tight text-warning">
+                {"★".repeat(event.rating)}
+                <span class="text-base-content/30">{"★".repeat(5 - event.rating)}</span>
+              </span>
+              <span class="sr-only">
+                Nota {event.rating} de 5
+              </span>
+              {
+                event.title.year && (
+                  <span class="text-xs text-base-content/60">{event.title.year}</span>
+                )
+              }
+            </p>
+          )
+        }
+        {
+          event.text?.trim() && (
+            <p
+              class={
+                variant === "compact"
+                  ? "mt-1 line-clamp-2 break-words text-sm leading-6 text-base-content/80"
+                  : "mt-1 line-clamp-4 break-words text-sm leading-6 text-base-content/80"
+              }
+            >
+              {event.text}
+            </p>
+          )
+        }
+        {
+          event.type === "rating" && typeof event.likeCount === "number" && (
+            <div class="mt-1 -ml-3">
+              <RatingLikeControl
+                username={event.actor.username}
+                mediaType={event.title.mediaType}
+                tmdbId={event.title.tmdbId}
+                likeCount={event.likeCount}
+                likedByViewer={event.likedByViewer === true}
+              />
+            </div>
+          )
+        }
+        {
+          event.type === "rating" && typeof event.commentCount === "number" && (
+            <div class="mt-1 -ml-3">
+              <RatingCommentsControl
+                username={event.actor.username}
+                mediaType={event.title.mediaType}
+                tmdbId={event.title.tmdbId}
+                commentCount={event.commentCount}
+                commentsEnabled={event.commentsEnabled === true}
+              />
+            </div>
+          )
+        }
+      </div>
+    </div>
+  </div>
+</article>

@@ -1,0 +1,252 @@
+---
+/**
+ * /cadastrar — cadastro com nome + e-mail + senha (SSR, cookies).
+ * Sem tabela profiles nesta etapa: o nome é preservado em
+ * `user_metadata.display_name` e migrado depois.
+ * Usuário já autenticado → redireciona para `?next=` ou /perfil.
+ */
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+import {
+  createSupabaseServerClient,
+  getCurrentUser,
+  sanitizeNext,
+  toFriendlyAuthError,
+} from "../lib/supabase/server";
+
+export const prerender = false;
+
+const nextParam = Astro.url.searchParams.get("next");
+const next = sanitizeNext(nextParam);
+
+// Já logado → sai daqui.
+{
+  const { user } = await getCurrentUser(Astro.request, Astro.cookies);
+  if (user) {
+    return Astro.redirect(next, 303);
+  }
+}
+
+let formError: string | null = null;
+let infoMessage: string | null = null;
+let nameValue = "";
+let emailValue = "";
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const name = String(form.get("name") ?? "").trim();
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const password = String(form.get("password") ?? "");
+  const confirm = String(form.get("confirm") ?? "");
+  const postNext = sanitizeNext(String(form.get("next") ?? "/perfil"));
+  nameValue = name;
+  emailValue = email;
+
+  if (!name || !email || !password || !confirm) {
+    Astro.response.status = 400;
+    formError = "Preencha nome, e-mail, senha e confirmação.";
+  } else if (password.length < 8) {
+    Astro.response.status = 400;
+    formError = "A senha precisa ter pelo menos 8 caracteres.";
+  } else if (password !== confirm) {
+    Astro.response.status = 400;
+    formError = "As senhas não conferem. Digite a mesma senha nos dois campos.";
+  } else {
+    try {
+      const supabase = createSupabaseServerClient(Astro.request, Astro.cookies);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { display_name: name } },
+      });
+
+      if (error) {
+        Astro.response.status = 400;
+        formError = toFriendlyAuthError(
+          error,
+          "Não foi possível criar sua conta. Tente de novo em instantes.",
+        );
+      } else if (data.session) {
+        return Astro.redirect(postNext, 303);
+      } else if (data.user) {
+        // Confirmação de e-mail exigida pelo projeto Supabase:
+        // conta criada, sem sessão ainda.
+        infoMessage =
+          "Conta criada! Verifique seu e-mail para confirmar e depois entre.";
+        nameValue = "";
+        emailValue = "";
+      } else {
+        Astro.response.status = 500;
+        formError = "Não foi possível criar sua conta. Tente de novo em instantes.";
+      }
+    } catch (error) {
+      Astro.response.status = 503;
+      formError = toFriendlyAuthError(
+        error,
+        "Não foi possível conectar. Verifique sua internet e tente de novo.",
+      );
+    }
+  }
+}
+---
+
+<Layout title="Criar conta — CineVee" description="Crie sua conta do CineVee." hideDock noindex>
+  <AppHeader />
+  <main class="cinevee-aurora mx-auto w-full max-w-md px-4 pb-16 pt-10 sm:pt-14">
+    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Sua conta</p>
+    <h1 class="mt-3 text-3xl font-extrabold tracking-tight sm:text-4xl">Criar conta</h1>
+    <p class="mt-2 text-base text-base-content/70">
+      Leva menos de um minuto. Sem complicação.
+    </p>
+
+    {
+      formError && (
+        <div role="alert" class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm">
+          {formError}
+        </div>
+      )
+    }
+    {
+      infoMessage && (
+        <div role="status" class="mt-6 rounded-2xl border border-success/40 bg-success/10 px-4 py-3 text-sm">
+          {infoMessage}{" "}
+          <a href="/entrar" class="font-semibold text-primary underline-offset-4 hover:underline">
+            Entrar agora
+          </a>
+        </div>
+      )
+    }
+
+    <form id="signup-form" method="post" action="/cadastrar" class="mt-6 flex flex-col gap-4" novalidate>
+      <input type="hidden" name="next" value={next} />
+
+      <div class="flex flex-col gap-2">
+        <label for="signup-name" class="text-sm font-semibold">Nome</label>
+        <input
+          id="signup-name"
+          name="name"
+          type="text"
+          required
+          autocomplete="name"
+          placeholder="Como podemos te chamar?"
+          value={nameValue}
+          class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+        />
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label for="signup-email" class="text-sm font-semibold">E-mail</label>
+        <input
+          id="signup-email"
+          name="email"
+          type="email"
+          required
+          autocomplete="email"
+          inputmode="email"
+          placeholder="voce@exemplo.com"
+          value={emailValue}
+          class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+        />
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label for="signup-password" class="text-sm font-semibold">Senha</label>
+        <input
+          id="signup-password"
+          name="password"
+          type="password"
+          required
+          autocomplete="new-password"
+          minlength="8"
+          placeholder="Mínimo de 8 caracteres"
+          class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+        />
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label for="signup-confirm" class="text-sm font-semibold">Confirmar senha</label>
+        <input
+          id="signup-confirm"
+          name="confirm"
+          type="password"
+          required
+          autocomplete="new-password"
+          minlength="8"
+          placeholder="Repita a senha"
+          class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+        />
+      </div>
+
+      <p id="signup-client-error" role="alert" style="display: none" class="rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm"></p>
+
+      <button
+        id="signup-submit"
+        type="submit"
+        class="btn btn-primary mt-2 min-h-12 w-full rounded-full text-base font-semibold"
+      >
+        Criar conta
+      </button>
+    </form>
+
+    <p class="mt-6 text-center text-sm text-base-content/70">
+      Já tem uma conta?{" "}
+      <a href={next && next !== "/perfil" ? `/entrar?next=${encodeURIComponent(next)}` : "/entrar"} class="font-semibold text-primary underline-offset-4 hover:underline">
+        Entrar
+      </a>
+    </p>
+
+    <p class="mt-4 text-center">
+      <a href="/" class="inline-flex min-h-12 items-center rounded-lg px-4 text-sm text-base-content/60 hover:text-base-content">
+        Voltar ao início
+      </a>
+    </p>
+  </main>
+</Layout>
+
+<script>
+  // UX apenas: validação básica + estado de loading.
+  // A validação real é server-side (Supabase).
+  (function () {
+    var form = document.getElementById("signup-form") as HTMLFormElement;
+    var submit = document.getElementById("signup-submit") as HTMLElement;
+    var clientError = document.getElementById("signup-client-error") as HTMLElement;
+    if (!form || !submit || !(form instanceof HTMLFormElement)) return;
+
+    form.addEventListener("submit", function (event) {
+      function val(id: string) {
+        var el = document.getElementById(id);
+        return el instanceof HTMLInputElement ? el.value : "";
+      }
+      var name = val("signup-name").trim();
+      var email = val("signup-email").trim();
+      var password = val("signup-password");
+      var confirm = val("signup-confirm");
+
+      function fail(message: string) {
+        event.preventDefault();
+        if (clientError) {
+          clientError.textContent = message;
+          clientError.style.display = "";
+        }
+      }
+
+      if (clientError) clientError.style.display = "none";
+      if (!name || !email || !password || !confirm) {
+        fail("Preencha nome, e-mail, senha e confirmação.");
+        return;
+      }
+      if (password.length < 8) {
+        fail("A senha precisa ter pelo menos 8 caracteres.");
+        return;
+      }
+      if (password !== confirm) {
+        fail("As senhas não conferem. Digite a mesma senha nos dois campos.");
+        return;
+      }
+
+      submit.setAttribute("disabled", "");
+      submit.textContent = "Criando conta...";
+    });
+  })();
+</script>

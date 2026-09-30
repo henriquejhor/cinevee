@@ -1,0 +1,253 @@
+---
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+import HomeHero from "../components/home/HomeHero.astro";
+import ContentSection from "../components/home/ContentSection.astro";
+import StreamingSection from "../components/home/StreamingSection.astro";
+import { getTrendingWeek } from "../lib/tmdb/trending";
+import { getPopularMovies, getPopularTv } from "../lib/tmdb/popular";
+import { getTopRatedContent } from "../lib/tmdb/topRated";
+import { getStreamingContent } from "../lib/tmdb/streaming";
+import { streamingFresh } from "../data/mockContent";
+
+// Home estática (prerender em build time), como antes do modo server.
+export const prerender = true;
+
+// Server-side: busca as seções no TMDB (language=pt-BR).
+// Em caso de falha, cada função usa os mocks da seção (fallback interno).
+const [trending, topRatedResult, popularMoviesResult, popularTvResult] =
+  await Promise.all([
+    getTrendingWeek(),
+    getTopRatedContent(),
+    getPopularMovies(),
+    getPopularTv(),
+  ]);
+
+const { items: trendingItems } = trending;
+const { items: topRatedItems } = topRatedResult;
+const { items: popularMovieItems } = popularMoviesResult;
+const { items: popularTvItems } = popularTvResult;
+
+// "Novidades nos streamings": conteúdo recente real (discover + flatrate BR).
+// Falha no build/prerender → mocks temporários (fallback, sem quebrar a Home).
+const streamingInitial = await getStreamingContent("all").catch((error) => {
+  const message = error instanceof Error ? error.message : "erro desconhecido";
+  console.error(`[TMDB] Falha no streaming inicial (${message}) — usando fallback mockado.`);
+  return streamingFresh;
+});
+
+const trendingIcon = '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>';
+const starIcon =
+  '<path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z"/>';
+---
+
+<Layout
+  title="CineVee — Descubra o que assistir"
+  description="Descubra filmes e séries que combinam com seu momento."
+  canonicalPath="/"
+>
+  <AppHeader />
+  <HomeHero />
+  <main class="mx-auto w-full max-w-7xl px-4 pb-32 sm:px-6 lg:px-8">
+    <ContentSection
+      title="Em alta"
+      items={trendingItems}
+      icon={trendingIcon}
+      featured
+      moreLabel="Ver mais conteúdos em alta"
+      moreHref="/explorar/em-alta"
+    />
+    <StreamingSection items={streamingInitial} />
+    <ContentSection
+      title="Muito bem avaliados"
+      items={topRatedItems}
+      icon={starIcon}
+      moreLabel="Ver mais conteúdos muito bem avaliados"
+      moreHref="/explorar/muito-bem-avaliados"
+    />
+    {/*
+      Feed social (Etapa 17): seção estática oculta, preenchida no browser
+      via 1 request (GET /api/feed/following?limit=6). Home continua
+      prerendered: nenhuma leitura de sessão no servidor aqui. Deslogado (401)
+      → seção permanece oculta. Posição: depois das seções editoriais
+      (Em alta / streamings / bem avaliados) e antes das rails populares —
+      complemento social sem virar "social first".
+    */}
+    <section data-feed-home hidden aria-labelledby="feed-home-title" class="mt-8">
+      <div class="flex min-h-12 items-center justify-between gap-2">
+        <h2 id="feed-home-title" class="text-lg font-bold tracking-tight">
+          De quem você segue
+        </h2>
+        <a
+          href="/seguindo"
+          aria-label="Ver mais atividades de quem você segue"
+          class="flex min-h-12 min-w-12 items-center justify-center rounded-lg px-3 text-sm font-medium text-primary hover:bg-primary/10"
+        >
+          Ver mais
+        </a>
+      </div>
+      <p data-feed-home-status role="status" class="mt-1 text-sm text-base-content/60" hidden>
+      </p>
+      <ul id="feed-home-list" aria-label="Atividades recentes" class="mt-3 flex w-full flex-col gap-3">
+      </ul>
+      <div data-feed-home-empty hidden class="mt-3 rounded-2xl border border-base-300 bg-base-200/60 p-5 text-center">
+        <p class="text-sm text-base-content/70">
+          Quando as pessoas que você segue avaliarem ou recomendarem algo, você verá por aqui.
+        </p>
+        <a
+          href="/buscar?tab=pessoas"
+          class="btn btn-outline mt-3 min-h-12 rounded-full px-8"
+        >
+          Encontrar pessoas
+        </a>
+      </div>
+    </section>
+    <ContentSection
+      title="Filmes populares"
+      items={popularMovieItems}
+      moreLabel="Ver mais filmes populares"
+      moreHref="/explorar/filmes-populares"
+    />
+    <ContentSection
+      title="Séries populares"
+      items={popularTvItems}
+      moreLabel="Ver mais séries populares"
+      moreHref="/explorar/series-populares"
+    />
+  </main>
+</Layout>
+
+<template id="feed-home-template">
+  <li>
+    <article
+      data-feed-card
+      class="cinevee-card flex gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3"
+    >
+      <a
+        data-role="actor-link"
+        href="#"
+        class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-sm font-extrabold text-white"
+      >
+        <img
+          data-role="avatar"
+          alt=""
+          width="80"
+          height="80"
+          loading="lazy"
+          aria-hidden="true"
+          class="h-full w-full object-cover"
+          hidden
+        />
+        <span data-role="initials" aria-hidden="true" class="flex h-full w-full items-center justify-center"></span>
+      </a>
+      <div class="min-w-0 flex-1">
+        <p class="break-words text-sm leading-snug">
+          <a data-role="name" href="#" class="font-semibold hover:text-primary"></a>
+          <span data-role="action" class="text-base-content/70"></span>
+          <a data-role="title-link" href="#" class="font-semibold hover:text-primary"></a><span data-role="action-suffix" class="text-base-content/70"></span>
+        </p>
+        <p class="mt-0.5 flex items-center gap-2 text-xs text-base-content/60">
+          <span data-role="username"></span>
+          <span aria-hidden="true">·</span>
+          <time data-role="time" datetime=""></time>
+        </p>
+        <div class="mt-2 flex gap-3">
+          <a
+            data-role="poster-link"
+            href="#"
+            class="block w-16 shrink-0 overflow-hidden rounded-lg bg-base-300/60"
+          >
+            <img
+              data-role="poster"
+              alt=""
+              width="160"
+              height="240"
+              loading="lazy"
+              aria-hidden="true"
+              class="aspect-[2/3] h-auto w-full object-cover"
+              hidden
+            />
+            <span
+              data-role="poster-fallback"
+              aria-hidden="true"
+              class="flex aspect-[2/3] w-full items-center justify-center text-xl font-extrabold text-base-content/40"
+              hidden
+            ></span>
+          </a>
+          <div class="min-w-0 flex-1 py-0.5">
+            <p data-role="stars" class="flex items-center gap-1.5" hidden>
+              <span aria-hidden="true" class="text-sm tracking-tight text-warning" data-role="stars-glyph"></span>
+              <span class="sr-only" data-role="stars-label"></span>
+            </p>
+            <p data-role="text" class="mt-1 line-clamp-2 text-sm leading-6 text-base-content/80" hidden></p>
+            <div data-role="like-slot" class="mt-1 -ml-3"></div>
+            <div data-role="comments-slot" class="mt-1 -ml-3"></div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </li>
+</template>
+
+<script is:inline src="/scripts/feed-cards.js"></script>
+<script is:inline src="/scripts/rating-likes.js"></script>
+<script is:inline src="/scripts/rating-comments.js"></script>
+<script>
+  // Prévia social da Home (Etapa 17): 1 request client-side, seção oculta
+  // por padrão. 401 (deslogado) → continua oculta, sem "faça login".
+  // 200 com items → mostra até 6. 200 vazio → onboarding discreto.
+  // Falha → seção oculta (nunca quebra a Home).
+  (function () {
+    var section = document.querySelector("[data-feed-home]") as HTMLElement;
+    var list = document.getElementById("feed-home-list") as HTMLElement;
+    var status = document.querySelector("[data-feed-home-status]") as HTMLElement;
+    var empty = document.querySelector("[data-feed-home-empty]") as HTMLElement;
+    var template = document.getElementById("feed-home-template") as HTMLElement;
+    var cards = (window as Window & {
+      CineVeeFeedCards?: {
+        validItem: (item: unknown) => boolean;
+        buildCard: (template: unknown, item: unknown) => Node | null;
+      };
+    }).CineVeeFeedCards;
+    if (!(section instanceof HTMLElement) || !(list instanceof HTMLElement) || !cards) return;
+
+    fetch("/api/feed/following?limit=6", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    })
+      .then(function (response) {
+        if (response.status === 401) return null;
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (!cards) return;
+        if (!(section instanceof HTMLElement)) return;
+        if (!(list instanceof HTMLElement)) return;
+        var items = Array.isArray(data.items) ? data.items : [];
+        var seen = new Set();
+        var shown = 0;
+        for (var i = 0; i < items.length && shown < 6; i++) {
+          var item = items[i];
+          if (!cards.validItem(item) || seen.has(item.eventKey)) continue;
+          seen.add(item.eventKey);
+          var node = cards.buildCard(template, item);
+          if (!node) continue;
+          list.appendChild(node);
+          shown += 1;
+        }
+        section.removeAttribute("hidden");
+        if (shown === 0) {
+          if (empty instanceof HTMLElement) empty.removeAttribute("hidden");
+        } else if (status instanceof HTMLElement) {
+          status.textContent = "";
+          status.setAttribute("hidden", "");
+        }
+      })
+      .catch(function () {
+        // Feed indisponível: Home segue intacta, sem a seção social.
+      });
+  })();
+</script>

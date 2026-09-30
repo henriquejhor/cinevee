@@ -1,0 +1,36 @@
+---
+/**
+ * Grid de pôsteres do Explore (Etapa 11).
+ *
+ * Mobile 2 colunas → sm 3 → lg 4 → xl 5. Pôster 2:3 dominante
+ * (via .cinevee-poster). Sem largura estreita: vive no max-w-7xl da página.
+ */
+import type { ContentItem } from "../../types/content";
+import ExplorePosterCard from "./ExplorePosterCard.astro";
+
+interface Props {
+  items: ContentItem[];
+  /** Rótulo acessível da lista (ex.: "Títulos em alta"). */
+  label: string;
+  /** Id do grid (o "Carregar mais" anexa aqui). */
+  gridId?: string;
+  /** Primeiros N cards com eager (acima da dobra). */
+  eagerCount?: number;
+}
+
+const { items, label, gridId = "explore-grid", eagerCount = 6 } = Astro.props;
+---
+
+<ul
+  id={gridId}
+  aria-label={label}
+  class="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+>
+  {
+    items.map((item, index) => (
+      <li data-explore-card data-key={`${item.type}:${item.id}`}>
+        <ExplorePosterCard item={item} eager={index < eagerCount} />
+      </li>
+    ))
+  }
+</ul>

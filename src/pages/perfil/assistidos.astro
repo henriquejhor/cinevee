@@ -1,0 +1,283 @@
+---
+/**
+ * /perfil/assistidos — Assistidos / Já assisti (Etapa 6 Supabase + RLS).
+ * Exige autenticação: deslogado → /entrar?next=%2Fperfil%2Fassistidos.
+ * Usa o ProfileShell compartilhado (mesmo hero/avatar/stats/tabs do /perfil).
+ * Mais recentes primeiro (watched_at DESC, ordenado no backend).
+ * Desmarcar NÃO recria a Minha Lista.
+ */
+import "../../styles/global.css";
+import Layout from "../../layouts/Layout.astro";
+import AppHeader from "../../components/navigation/AppHeader.astro";
+import ProfileShell from "../../components/profile/ProfileShell.astro";
+import { getDisplayName } from "../../lib/supabase/server";
+import { getUserProfile } from "../../lib/profile/service";
+import { getWatchlistCount } from "../../lib/watchlist/service";
+import { getRatingsCount } from "../../lib/ratings/service";
+import {
+  getUserWatchedTitles,
+  getWatchedCount,
+} from "../../lib/watched/service";
+import { buildPosterUrl } from "../../lib/tmdb/image";
+
+export const prerender = false;
+
+// UMA sessão validada (1 auth.getUser) compartilhada entre profile e
+// lista — antes eram 2 roundtrips de auth por request.
+const { supabase, user, profile } = await getUserProfile(Astro.request, Astro.cookies);
+
+if (!user) {
+  return Astro.redirect("/entrar?next=%2Fperfil%2Fassistidos", 303);
+}
+
+const ctx = { supabase, user };
+const displayName = profile?.displayName?.trim()
+  ? (profile.displayName as string)
+  : getDisplayName(user);
+
+// Cargas independentes em paralelo (antes: awaits seriais).
+function settledValue<T>(res: PromiseSettledResult<T>, fallback: T): T {
+  return res.status === "fulfilled" ? res.value : fallback;
+}
+
+const [watchlistCountRes, watchedCountRes, ratingsCountRes, itemsRes] =
+  await Promise.allSettled([
+    getWatchlistCount(ctx),
+    getWatchedCount(ctx),
+    getRatingsCount(ctx),
+    getUserWatchedTitles(ctx),
+  ]);
+
+const watchlistCount: number | null = settledValue(watchlistCountRes, null);
+const watchedCount: number | null = settledValue(watchedCountRes, null);
+const ratingsCount: number | null = settledValue(ratingsCountRes, null);
+
+const items: Awaited<ReturnType<typeof getUserWatchedTitles>> = settledValue(itemsRes, []);
+const loadFailed = itemsRes.status === "rejected";
+
+function typeLabel(mediaType: string): string {
+  return mediaType === "tv" ? "Série" : "Filme";
+}
+---
+
+<Layout title="Assistidos — CineVee" description="Os filmes e séries que você já assistiu." noindex>
+  <AppHeader />
+  <main>
+    <ProfileShell
+      displayName={displayName}
+      username={profile?.username ?? null}
+      bio={profile?.bio ?? null}
+      avatarUrl={profile?.avatarUrl ?? null}
+      watchlistCount={watchlistCount}
+      watchedCount={watchedCount}
+      ratingsCount={ratingsCount}
+      activeTab="watched"
+    >
+      <h2 class="mt-10 text-xl font-bold tracking-tight">Títulos assistidos</h2>
+      <p class="mt-1 text-sm text-base-content/60">
+        Seu histórico: filmes e séries que você já terminou.
+      </p>
+
+      {
+        loadFailed ? (
+          <div role="alert" class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm">
+            Não foi possível carregar seus assistidos agora. Tente novamente em instantes.
+          </div>
+        ) : (
+          <>
+            <div
+              id="watched-empty"
+              style={items.length > 0 ? "display: none" : undefined}
+              class="mt-6 flex flex-col items-center rounded-3xl border border-base-300 bg-base-200/40 px-6 py-12 text-center"
+            >
+              <svg
+                aria-hidden="true"
+                width="40"
+                height="40"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-base-content/30"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <p class="mt-4 text-lg font-bold">Você ainda não marcou nenhum título como assistido.</p>
+              <p class="mt-1 max-w-[42ch] text-sm text-base-content/60">
+                Quando terminar um filme ou série, marque como assistido para construir seu histórico.
+              </p>
+              <div class="mt-6 flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <a
+                  href="/descobrir"
+                  class="btn btn-primary min-h-12 rounded-full px-8"
+                >
+                  Descobrir títulos
+                </a>
+                <a
+                  href="/buscar"
+                  class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-8"
+                >
+                  Buscar
+                </a>
+              </div>
+            </div>
+
+            <p
+              id="watched-status"
+              role="status"
+              aria-live="polite"
+              style="display: none"
+              class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm"
+            />
+
+            <ul
+              id="watched-grid"
+              aria-label="Títulos assistidos"
+              class="mt-6 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+            >
+              {
+                items.map((item) => {
+                  const posterUrl = buildPosterUrl(item.posterPath);
+                  const label = typeLabel(item.mediaType);
+                  return (
+                    <li data-watched-card data-tmdb-id={item.tmdbId} data-media-type={item.mediaType}>
+                      <article class="relative">
+                        <a
+                          href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                          class="cinevee-card group block rounded-xl"
+                          aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                        >
+                          {
+                            posterUrl ? (
+                              <img
+                                src={posterUrl}
+                                alt={`Pôster de ${item.title}`}
+                                width="500"
+                                height="750"
+                                loading="lazy"
+                                class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                              />
+                            ) : (
+                              <div class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                                <svg
+                                  aria-hidden="true"
+                                  class="h-10 w-10 text-white/25"
+                                  viewBox="0 0 24 24"
+                                  fill="currentColor"
+                                >
+                                  <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                </svg>
+                              </div>
+                            )
+                          }
+                          <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                            {item.title}
+                          </p>
+                          <p class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                            {item.year && <span>{item.year}</span>}
+                            {item.year && <span aria-hidden="true"> · </span>}
+                            <span>{label}</span>
+                          </p>
+                        </a>
+                        <button
+                          type="button"
+                          data-watched-remove
+                          aria-label={`Remover ${item.title} dos assistidos`}
+                          class="absolute right-1.5 top-1.5 flex min-h-12 min-w-12 items-center justify-center rounded-full border border-white/15 bg-black/55 text-red-300/90 backdrop-blur-sm transition-colors duration-200 hover:border-red-800/50 hover:bg-red-950/70 hover:text-red-200"
+                        >
+                          <svg
+                            aria-hidden="true"
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M4 7h16" />
+                            <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            <path d="M6.5 7l1 13h9l1-13" />
+                          </svg>
+                        </button>
+                      </article>
+                    </li>
+                  );
+                })
+              }
+            </ul>
+          </>
+        )
+      }
+    </ProfileShell>
+  </main>
+</Layout>
+
+<script>
+  // Desmarcar sem reload: DELETE /api/watched → remove o card do DOM.
+  // NÃO recria a Minha Lista. Nenhum user_id sai do browser.
+  (function () {
+    var grid = document.getElementById("watched-grid") as HTMLElement;
+    var empty = document.getElementById("watched-empty") as HTMLElement;
+    var status = document.getElementById("watched-status") as HTMLElement;
+    if (!(grid instanceof HTMLElement)) return;
+
+    function showError() {
+      if (status instanceof HTMLElement) {
+        status.textContent = "Não foi possível remover dos assistidos. Tente de novo.";
+        status.style.display = "";
+      }
+    }
+
+    function hideError() {
+      if (status instanceof HTMLElement) status.style.display = "none";
+    }
+
+    grid.addEventListener("click", function (event) {
+      var target = event.target;
+      var button = target instanceof Element ? target.closest("[data-watched-remove]") : null;
+      if (!(button instanceof HTMLButtonElement)) return;
+      var card = button.closest("[data-watched-card]");
+      if (!(card instanceof HTMLElement)) return;
+
+      var tmdbId = Number(card.getAttribute("data-tmdb-id"));
+      var mediaType = card.getAttribute("data-media-type");
+      if (!Number.isInteger(tmdbId) || tmdbId <= 0 || (mediaType !== "movie" && mediaType !== "tv")) {
+        showError();
+        return;
+      }
+
+      hideError();
+      button.setAttribute("disabled", "");
+      button.classList.add("opacity-50");
+
+      fetch("/api/watched", {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tmdbId: tmdbId, mediaType: mediaType }),
+      })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(function () {
+          if (!(card instanceof HTMLElement)) return;
+          if (!(grid instanceof HTMLElement)) return;
+          card.remove();
+          if (empty instanceof HTMLElement && grid.querySelectorAll("[data-watched-card]").length === 0) {
+            empty.style.display = "";
+          }
+        })
+        .catch(function () {
+          if (!(button instanceof HTMLButtonElement)) return;
+          button.removeAttribute("disabled");
+          button.classList.remove("opacity-50");
+          showError();
+        });
+    });
+  })();
+</script>

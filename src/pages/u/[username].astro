@@ -1,0 +1,1208 @@
+---
+/**
+ * /u/[username] — perfil público (Etapa 14). Sem login obrigatório.
+ *
+ * Lê SOMENTE via RPCs allowlisted (nunca tabelas base). Inexistente e
+ * privado têm o mesmo comportamento: 404 "Perfil não disponível."
+ * Tabs (?tab=): sobre (landing) | assistidos | avaliacoes — só as
+ * disponíveis aparecem. Assistidos/avaliações paginam (SSR + Carregar
+ * mais, com dedupe por mediaType:tmdbId). Sem TasteProfile/IA, sem
+ * Editar/Logout, sem expor UUID/email/watchlist.
+ */
+import "../../styles/global.css";
+import Layout from "../../layouts/Layout.astro";
+import AppHeader from "../../components/navigation/AppHeader.astro";
+import TitleNotFound from "../../components/details/TitleNotFound.astro";
+import RatingLikeControl from "../../components/ratings/RatingLikeControl.astro";
+import RatingCommentsControl from "../../components/ratings/RatingCommentsControl.astro";
+import {
+  getPublicFavorites,
+  getPublicFollowCounts,
+  getPublicFollowState,
+  getPublicProfile,
+  getPublicRatings,
+  getPublicRecommendations,
+  getPublicSupabase,
+  getPublicWatched,
+  normalizePublicUsername,
+  type PublicPick,
+  type PublicRatedTitle,
+  type PublicWatchedItem,
+} from "../../lib/publicProfile/service";
+
+export const prerender = false;
+
+const username = normalizePublicUsername(Astro.params.username);
+const supabase = getPublicSupabase(Astro.request, Astro.cookies);
+const profile = username ? await getPublicProfile(supabase, username) : null;
+
+if (!username || !profile) {
+  Astro.response.status = 404;
+}
+
+type PublicTab = "sobre" | "assistidos" | "avaliacoes";
+const requestedTab = Astro.url.searchParams.get("tab");
+const availableTabs: PublicTab[] = profile
+  ? [
+      "sobre",
+      ...(profile.showWatched ? ["assistidos" as const] : []),
+      ...(profile.showRatings ? ["avaliacoes" as const] : []),
+    ]
+  : [];
+
+const tab: PublicTab =
+  requestedTab === "assistidos" || requestedTab === "avaliacoes"
+    ? requestedTab
+    : "sobre";
+
+if (profile && !availableTabs.includes(tab)) {
+  Astro.response.status = 404;
+}
+const notFound = !profile || !availableTabs.includes(tab);
+
+let favorites: PublicPick[] = [];
+let recommendations: PublicPick[] = [];
+let watched: PublicRatedTitle[] | PublicWatchedItem[] = [];
+let watchedPage = 1;
+let watchedHasMore = false;
+let ratings: PublicRatedTitle[] = [];
+let ratingsPage = 1;
+let ratingsHasMore = false;
+let followersCount = 0;
+let followingCount = 0;
+let isFollowing = false;
+let isSelf = false;
+
+if (profile && username && !notFound) {
+  try {
+    // Contadores + estado de follow em paralelo com o conteúdo da tab
+    // (sem awaits seriais; get_follow_state usa a sessão quando há).
+    const [countsRes, stateRes] = await Promise.allSettled([
+      getPublicFollowCounts(supabase, username),
+      getPublicFollowState(supabase, username),
+    ]);
+    if (countsRes.status === "fulfilled") {
+      followersCount = countsRes.value.followersCount;
+      followingCount = countsRes.value.followingCount;
+    }
+    if (stateRes.status === "fulfilled") {
+      isFollowing = stateRes.value.following;
+      isSelf = stateRes.value.isSelf;
+    }
+    if (tab === "sobre") {
+      const [favRes, recRes] = await Promise.allSettled([
+        profile.showFavorites ? getPublicFavorites(supabase, username) : Promise.resolve([]),
+        profile.showRecommendations
+          ? getPublicRecommendations(supabase, username)
+          : Promise.resolve([]),
+      ]);
+      favorites = favRes.status === "fulfilled" ? favRes.value : [];
+      recommendations = recRes.status === "fulfilled" ? recRes.value : [];
+    } else if (tab === "assistidos") {
+      const result = await getPublicWatched(supabase, username, 1);
+      watched = result.items;
+      watchedPage = result.page;
+      watchedHasMore = result.hasMore;
+    } else {
+      const result = await getPublicRatings(supabase, username, 1);
+      ratings = result.items;
+      ratingsPage = result.page;
+      ratingsHasMore = result.hasMore;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "erro desconhecido";
+    console.error(`[PublicProfile] Falha em /u/${username} (${message}).`);
+    Astro.response.status = 500;
+  }
+}
+const loadFailed = Astro.response.status === 500;
+
+const displayName =
+  profile?.displayName?.trim() || (profile ? `@${profile.username}` : "");
+const pageTitle = profile
+  ? `${displayName} (@${profile.username}) — CineVee`
+  : "Perfil não disponível — CineVee";
+const pageDescription = profile?.bio?.trim()
+  ? profile.bio.trim().slice(0, 160)
+  : profile
+    ? `Veja os favoritos e avaliações de @${profile.username} no CineVee.`
+    : "Este perfil não está disponível no CineVee.";
+
+function typeLabel(mediaType: string): string {
+  return mediaType === "tv" ? "Série" : "Filme";
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.charAt(0) ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.charAt(0) ?? "") : "";
+  return (first + last).toUpperCase() || "?";
+}
+
+const tabHref = (t: PublicTab) =>
+  t === "sobre" ? `/u/${username}` : `/u/${username}?tab=${t}`;
+const tabLabel: Record<PublicTab, string> = {
+  sobre: "Sobre",
+  assistidos: "Assistidos",
+  avaliacoes: "Avaliações",
+};
+---
+
+<Layout title={pageTitle} description={pageDescription} canonicalPath={profile ? `/u/${profile.username}` : undefined} image={profile?.avatarUrl ?? undefined}>
+  <AppHeader />
+  {
+    notFound || loadFailed ? (
+      <main class="mx-auto w-full max-w-3xl px-4 pb-32 pt-16 sm:px-6">
+        <TitleNotFound
+          heading={loadFailed ? "Não foi possível carregar este perfil." : "Perfil não disponível."}
+          text={
+            loadFailed
+              ? "Tente novamente em instantes."
+              : "Este perfil não existe ou não está público. Confira o link e tente de novo."
+          }
+        />
+      </main>
+    ) : (
+      profile && (
+        <main class="pb-32">
+          {/* Capa Cinematic Aurora (mesma linguagem do perfil privado). */}
+          <div
+            aria-hidden="true"
+            class="relative h-36 overflow-hidden sm:h-44 lg:h-52"
+          >
+            <div class="absolute inset-0 bg-gradient-to-br from-violet-950 via-[#141b3d] to-[#2a1030]" />
+            <div class="absolute -left-16 -top-24 h-64 w-64 rounded-full bg-violet-600/30 blur-3xl" />
+            <div class="absolute right-[-4rem] top-[-6rem] h-72 w-72 rounded-full bg-blue-600/25 blur-3xl" />
+            <div class="absolute bottom-[-7rem] left-1/3 h-56 w-96 rounded-full bg-fuchsia-600/15 blur-3xl" />
+            <div class="absolute inset-0 bg-gradient-to-t from-base-100 via-transparent to-transparent" />
+          </div>
+
+          <div class="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+            <div class="relative z-10 -translate-y-12 sm:-mt-14 sm:translate-y-0 lg:-mt-16">
+              {
+                profile.avatarUrl ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt={`Foto de ${displayName}`}
+                    width="256"
+                    height="256"
+                    loading="eager"
+                    class="h-24 w-24 rounded-full border-2 border-base-100 object-cover shadow-xl sm:h-28 sm:w-28 lg:h-32 lg:w-32"
+                  />
+                ) : (
+                  <div
+                    aria-hidden="true"
+                    class="flex h-24 w-24 items-center justify-center rounded-full border-2 border-base-100 bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-3xl font-extrabold text-white shadow-xl sm:h-28 sm:w-28 lg:h-32 lg:w-32 lg:text-4xl"
+                  >
+                    {initials(displayName)}
+                  </div>
+                )
+              }
+            </div>
+
+            <h1 class="truncate text-2xl font-extrabold tracking-tight sm:text-3xl">
+              {displayName}
+            </h1>
+            <p class="mt-1 text-sm text-base-content/60">@{profile.username}</p>
+            {
+              profile.bio?.trim() && (
+                <p class="mt-3 max-w-prose break-words text-pretty text-sm leading-6 text-base-content/75 sm:text-base">
+                  {profile.bio}
+                </p>
+              )
+            }
+            <p class="mt-3 flex min-h-12 items-center gap-1.5 text-sm">
+              <a
+                href={`/u/${profile.username}/seguidores`}
+                class="rounded-lg px-1 py-3 font-semibold text-base-content underline-offset-4 hover:underline"
+                aria-label={`${followersCount} ${followersCount === 1 ? "seguidor" : "seguidores"}`}
+              >
+                <span data-followers-count>{followersCount}</span>{" "}
+                <span data-followers-label>{followersCount === 1 ? "seguidor" : "seguidores"}</span>
+              </a>
+              <span aria-hidden="true" class="text-base-content/40">·</span>
+              <a
+                href={`/u/${profile.username}/seguindo`}
+                class="rounded-lg px-1 py-3 font-semibold text-base-content underline-offset-4 hover:underline"
+                aria-label={`${followingCount} seguindo`}
+              >
+                <span data-following-count>{followingCount}</span> seguindo
+              </a>
+            </p>
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+              {
+                isSelf ? (
+                  <p class="inline-flex min-h-12 items-center rounded-full border border-base-300/70 px-6 text-sm text-base-content/60">
+                    Este é seu perfil
+                  </p>
+                ) : (
+                  <button
+                    id="follow-button"
+                    type="button"
+                    data-username={profile.username}
+                    data-following={isFollowing ? "true" : "false"}
+                    aria-pressed={isFollowing ? "true" : "false"}
+                    aria-label={isFollowing ? `Deixar de seguir @${profile.username}` : `Seguir @${profile.username}`}
+                    class:list={[
+                      "btn min-h-12 rounded-full px-6 text-sm font-semibold",
+                      isFollowing ? "btn-primary" : "btn-outline",
+                    ]}
+                  >
+                    {isFollowing ? "✓ Seguindo" : "Seguir"}
+                  </button>
+                )
+              }
+              <button
+                id="public-share"
+                type="button"
+                data-share-url={`/u/${profile.username}`}
+                class="btn btn-outline min-h-12 rounded-full px-6 text-sm font-semibold"
+              >
+                Compartilhar perfil
+              </button>
+              <p id="public-share-status" role="status" aria-live="polite" class="text-xs text-base-content/60" />
+            </div>
+            {
+              !isSelf && (
+                <div class="mt-2">
+                  <button
+                    id="block-button"
+                    type="button"
+                    data-username={profile.username}
+                    data-armed="false"
+                    aria-label="Bloquear usuário"
+                    class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-6 text-sm text-error/70"
+                  >
+                    Bloquear usuário
+                  </button>
+                  <p id="block-status" role="status" aria-live="polite" class="mt-2 hidden max-w-prose text-xs leading-5 text-base-content/60" />
+                </div>
+              )
+            }
+            <p id="follow-status" role="status" aria-live="polite" class="mt-2 min-h-5 text-xs text-base-content/60" />
+
+            {
+              availableTabs.length > 1 && (
+                <nav aria-label="Seções do perfil" class="mt-8 border-b border-base-300/60">
+                  <ul class="cinevee-no-scrollbar -mb-px flex gap-6 overflow-x-auto">
+                    {
+                      availableTabs.map((t) => (
+                        <li class="shrink-0">
+                          {
+                            t === tab ? (
+                              <span
+                                aria-current="page"
+                                class="inline-flex min-h-12 items-center gap-2 whitespace-nowrap border-b-2 border-primary px-1 py-3 text-sm font-semibold text-base-content"
+                              >
+                                {tabLabel[t]}
+                              </span>
+                            ) : (
+                              <a
+                                href={tabHref(t)}
+                                class="inline-flex min-h-12 items-center gap-2 whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm font-semibold text-base-content/60 transition-colors duration-200 hover:border-base-300 hover:text-base-content"
+                              >
+                                {tabLabel[t]}
+                              </a>
+                            )
+                          }
+                        </li>
+                      ))
+                    }
+                  </ul>
+                </nav>
+              )
+            }
+
+            {/* SOBRE */}
+            {
+              tab === "sobre" && (
+                <div class="pb-4">
+                  {
+                    profile.showFavorites && favorites.length > 0 && (
+                      <section aria-labelledby="public-favorites-title" class="mt-10">
+                        <h2 id="public-favorites-title" class="text-xl font-bold tracking-tight">
+                          Favoritos de {displayName}
+                        </h2>
+                        <ul
+                          id="public-grid"
+                          aria-label="Favoritos"
+                          class="mt-4 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+                        >
+                          {
+                            favorites.map((item) => {
+                              const label = typeLabel(item.mediaType);
+                              return (
+                                <li data-public-card data-key={`${item.mediaType}:${item.tmdbId}`}>
+                                  <a
+                                    href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                                    class="cinevee-card group block rounded-xl"
+                                    aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                                  >
+                                    {
+                                      item.posterUrl ? (
+                                        <img
+                                          src={item.posterUrl}
+                                          alt={`Pôster de ${item.title}`}
+                                          width="500"
+                                          height="750"
+                                          loading="lazy"
+                                          class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                                        />
+                                      ) : (
+                                        <div class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                                          <svg
+                                            aria-hidden="true"
+                                            class="h-10 w-10 text-white/25"
+                                            viewBox="0 0 24 24"
+                                            fill="currentColor"
+                                          >
+                                            <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                          </svg>
+                                        </div>
+                                      )
+                                    }
+                                    <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                                      {item.title}
+                                    </p>
+                                    <p class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                                      {item.year && <span>{item.year}</span>}
+                                      {item.year && <span aria-hidden="true"> · </span>}
+                                      <span>{label}</span>
+                                    </p>
+                                  </a>
+                                </li>
+                              );
+                            })
+                          }
+                        </ul>
+                      </section>
+                    )
+                  }
+                  {
+                    profile.showRecommendations && recommendations.length > 0 && (
+                      <section aria-labelledby="public-recs-title" class="mt-10">
+                        <h2 id="public-recs-title" class="text-xl font-bold tracking-tight">
+                          {displayName} recomenda
+                        </h2>
+                        <ul aria-label="Recomendações" class="mt-4 flex flex-col gap-4">
+                          {
+                            recommendations.map((item) => {
+                              const label = typeLabel(item.mediaType);
+                              return (
+                                <li data-public-card data-key={`${item.mediaType}:${item.tmdbId}`}>
+                                  <article class="flex gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3">
+                                    <a
+                                      href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                                      class="block w-16 shrink-0 sm:w-20"
+                                      tabindex="-1"
+                                      aria-hidden="true"
+                                    >
+                                      {
+                                        item.posterUrl ? (
+                                          <img
+                                            src={item.posterUrl}
+                                            alt=""
+                                            width="500"
+                                            height="750"
+                                            loading="lazy"
+                                            class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                                          />
+                                        ) : (
+                                          <div class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                                            <svg
+                                              aria-hidden="true"
+                                              class="h-8 w-8 text-white/25"
+                                              viewBox="0 0 24 24"
+                                              fill="currentColor"
+                                            >
+                                              <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                            </svg>
+                                          </div>
+                                        )
+                                      }
+                                    </a>
+                                    <div class="min-w-0 flex-1">
+                                      <a
+                                        href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                                        class="cinevee-card group inline-block max-w-full rounded-lg"
+                                        aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                                      >
+                                        <p class="truncate text-sm font-semibold leading-snug group-hover:text-primary">
+                                          {item.title}
+                                        </p>
+                                      </a>
+                                      <p class="mt-0.5 text-xs text-base-content/60">
+                                        {item.year && <span>{item.year}</span>}
+                                        {item.year && <span aria-hidden="true"> · </span>}
+                                        <span>{label}</span>
+                                      </p>
+                                      {
+                                        item.note && (
+                                          <p class="cinevee-review-text mt-2 text-sm leading-6 text-base-content/80">
+                                            {item.note}
+                                          </p>
+                                        )
+                                      }
+                                    </div>
+                                  </article>
+                                </li>
+                              );
+                            })
+                          }
+                        </ul>
+                      </section>
+                    )
+                  }
+                  {
+                    (!profile.showFavorites || favorites.length === 0) &&
+                      (!profile.showRecommendations || recommendations.length === 0) && (
+                        <p class="mt-10 text-sm text-base-content/60">
+                          @{profile.username} ainda não compartilhou favoritos ou recomendações.
+                        </p>
+                      )
+                  }
+                </div>
+              )
+            }
+
+            {/* ASSISTIDOS */}
+            {
+              tab === "assistidos" && (
+                <div class="pb-4">
+                  <h2 class="mt-10 text-xl font-bold tracking-tight">
+                    Assistidos de {displayName}
+                  </h2>
+                  <p role="status" data-public-status class="mt-1 text-sm text-base-content/60">
+                    Mostrando {(watched as PublicWatchedItem[]).length} título{(watched as PublicWatchedItem[]).length === 1 ? "" : "s"}
+                  </p>
+                  {
+                    (watched as PublicWatchedItem[]).length === 0 && (
+                      <p class="mt-4 rounded-2xl border border-base-300/60 bg-base-200/40 px-4 py-3 text-sm text-base-content/70">
+                        Ainda não há assistidos públicos por aqui.
+                      </p>
+                    )
+                  }
+                  <ul
+                    id="public-grid"
+                    aria-label="Assistidos"
+                    class="mt-4 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+                  >
+                    {
+                      (watched as PublicWatchedItem[]).map((item) => {
+                        const label = typeLabel(item.mediaType);
+                        return (
+                          <li data-public-card data-key={`${item.mediaType}:${item.tmdbId}`}>
+                            <a
+                              href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                              class="cinevee-card group block rounded-xl"
+                              aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                            >
+                              {
+                                item.posterUrl ? (
+                                  <img
+                                    src={item.posterUrl}
+                                    alt={`Pôster de ${item.title}`}
+                                    width="500"
+                                    height="750"
+                                    loading="lazy"
+                                    class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                                  />
+                                ) : (
+                                  <div class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                                    <svg
+                                      aria-hidden="true"
+                                      class="h-10 w-10 text-white/25"
+                                      viewBox="0 0 24 24"
+                                      fill="currentColor"
+                                    >
+                                      <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                    </svg>
+                                  </div>
+                                )
+                              }
+                              <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                                {item.title}
+                              </p>
+                              <p class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                                {item.year && <span>{item.year}</span>}
+                                {item.year && <span aria-hidden="true"> · </span>}
+                                <span>{label}</span>
+                              </p>
+                            </a>
+                          </li>
+                        );
+                      })
+                    }
+                  </ul>
+                  {
+                    watchedHasMore && (
+                      <div class="mt-8 flex flex-col items-center gap-3">
+                        <button
+                          type="button"
+                          data-public-more
+                          data-username={profile.username}
+                          data-kind="watched"
+                          data-next-page={watchedPage + 1}
+                          class="btn btn-outline min-h-12 rounded-full px-10"
+                        >
+                          Carregar mais
+                        </button>
+                        <p role="status" data-public-more-status class="min-h-5 text-xs text-base-content/60" />
+                      </div>
+                    )
+                  }
+                </div>
+              )
+            }
+
+            {/* AVALIAÇÕES */}
+            {
+              tab === "avaliacoes" && (
+                <div class="pb-4">
+                  <h2 class="mt-10 text-xl font-bold tracking-tight">
+                    Avaliações de {displayName}
+                  </h2>
+                  <p role="status" data-public-status class="mt-1 text-sm text-base-content/60">
+                    Mostrando {ratings.length} título{ratings.length === 1 ? "" : "s"}
+                  </p>
+                  {
+                    ratings.length === 0 && (
+                      <p class="mt-4 rounded-2xl border border-base-300/60 bg-base-200/40 px-4 py-3 text-sm text-base-content/70">
+                        Ainda não há avaliações públicas por aqui.
+                      </p>
+                    )
+                  }
+                  <ul
+                    id="public-grid"
+                    aria-label="Avaliações"
+                    data-viewer-is-self={isSelf ? "true" : "false"}
+                    class="mt-4 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+                  >
+                    {
+                      ratings.map((item) => {
+                        const label = typeLabel(item.mediaType);
+                        return (
+                          <li data-public-card data-key={`${item.mediaType}:${item.tmdbId}`}>
+                            <a
+                              href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                              class="cinevee-card group block rounded-xl"
+                              aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}, nota ${item.rating} de 5`}
+                            >
+                              {
+                                item.posterUrl ? (
+                                  <img
+                                    src={item.posterUrl}
+                                    alt={`Pôster de ${item.title}`}
+                                    width="500"
+                                    height="750"
+                                    loading="lazy"
+                                    class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                                  />
+                                ) : (
+                                  <div class="cinevee-poster flex items-center justify-center" aria-hidden="true">
+                                    <svg
+                                      aria-hidden="true"
+                                      class="h-10 w-10 text-white/25"
+                                      viewBox="0 0 24 24"
+                                      fill="currentColor"
+                                    >
+                                      <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                    </svg>
+                                  </div>
+                                )
+                              }
+                              <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                                {item.title}
+                              </p>
+                              <p class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                                {item.year && <span>{item.year}</span>}
+                                {item.year && <span aria-hidden="true"> · </span>}
+                                <span>{label}</span>
+                              </p>
+                              <p class="mt-1 flex items-center gap-1 px-0.5" aria-hidden="true">
+                                {
+                                  [1, 2, 3, 4, 5].map((n) => (
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      class={n <= item.rating ? "fill-amber-400 text-amber-400" : "fill-transparent text-base-content/30"}
+                                      fill="currentColor"
+                                      stroke="currentColor"
+                                      stroke-width="1.5"
+                                      stroke-linejoin="round"
+                                    >
+                                      <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                                    </svg>
+                                  ))
+                                }
+                              </p>
+                            </a>
+                            {
+                              item.reviewText && (
+                                <p class="cinevee-review-text mt-2 px-0.5 text-sm leading-6 text-base-content/80">
+                                  {item.reviewText}
+                                </p>
+                              )
+                            }
+                            {
+                              typeof item.likeCount === "number" && (
+                                <div class="mt-1 -ml-3">
+                                  <RatingLikeControl
+                                    username={profile?.username ?? ""}
+                                    mediaType={item.mediaType}
+                                    tmdbId={item.tmdbId}
+                                    likeCount={item.likeCount}
+                                    likedByViewer={item.likedByViewer === true}
+                                    interactive={!isSelf}
+                                  />
+                                </div>
+                              )
+                            }
+                            {
+                              typeof item.commentCount === "number" && (
+                                <div class="mt-1 -ml-3">
+                                  <RatingCommentsControl
+                                    username={profile?.username ?? ""}
+                                    mediaType={item.mediaType}
+                                    tmdbId={item.tmdbId}
+                                    commentCount={item.commentCount}
+                                    commentsEnabled={item.commentsEnabled === true}
+                                  />
+                                </div>
+                              )
+                            }
+                          </li>
+                        );
+                      })
+                    }
+                  </ul>
+                  {
+                    ratingsHasMore && (
+                      <div class="mt-8 flex flex-col items-center gap-3">
+                        <button
+                          type="button"
+                          data-public-more
+                          data-username={profile.username}
+                          data-kind="ratings"
+                          data-next-page={ratingsPage + 1}
+                          class="btn btn-outline min-h-12 rounded-full px-10"
+                        >
+                          Carregar mais
+                        </button>
+                        <p role="status" data-public-more-status class="min-h-5 text-xs text-base-content/60" />
+                      </div>
+                    )
+                  }
+                </div>
+              )
+            }
+          </div>
+        </main>
+      )
+    )
+  }
+</Layout>
+
+<template id="public-card-template">
+  <li data-public-card>
+    <a
+      data-role="link"
+      href="#"
+      class="cinevee-card group block rounded-xl"
+    >
+      <div data-role="poster" class="cinevee-poster" style="--ph: 250" aria-hidden="true">
+        <svg
+          aria-hidden="true"
+          class="absolute inset-0 m-auto h-10 w-10 text-white/25"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+        </svg>
+        <img
+          data-role="img"
+          alt=""
+          width="500"
+          height="750"
+          loading="lazy"
+          class="absolute inset-0 h-full w-full object-cover"
+          hidden
+        />
+      </div>
+      <div class="mt-2 px-0.5">
+        <p data-role="title" class="truncate text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+        </p>
+        <p data-role="meta" class="mt-0.5 text-xs text-base-content/60"></p>
+        <p data-role="stars" class="mt-1 hidden items-center gap-1" aria-hidden="true">
+          <svg data-star="1" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" /></svg>
+          <svg data-star="2" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" /></svg>
+          <svg data-star="3" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" /></svg>
+          <svg data-star="4" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" /></svg>
+          <svg data-star="5" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" /></svg>
+        </p>
+        <p data-role="review" class="cinevee-review-text mt-2 text-sm leading-6 text-base-content/80" hidden></p>
+      </div>
+    </a>
+    <div data-role="like-slot" class="mt-1 -ml-3"></div>
+    <div data-role="comments-slot" class="mt-1 -ml-3"></div>
+  </li>
+</template>
+
+<script is:inline src="/scripts/rating-likes.js"></script>
+<script is:inline src="/scripts/rating-comments.js"></script>
+
+<script>
+  // Perfil público: Compartilhar (navigator.share + fallback copiar) e
+  // Carregar mais em Assistidos/Avaliações (dedupe por mediaType:tmdbId,
+  // mesmo padrão do Explore). Texto do usuário via textContent (nunca
+  // innerHTML). Nenhum user_id no browser.
+  (function () {
+    // Seguir / deixar de seguir (POST/DELETE /api/follows, sem reload).
+    // Deslogado → /entrar?next= (sem follow automático após login).
+    // "✓ Seguindo" exige segundo clique ("Deixar de seguir?") para
+    // confirmar — evita unfollow acidental. Contador atualiza sem reload.
+    var followButton = document.getElementById("follow-button") as HTMLButtonElement | null;
+    var followStatus = document.getElementById("follow-status") as HTMLElement | null;
+    if (followButton instanceof HTMLButtonElement) {
+      (function initFollow() {
+        if (!(followButton instanceof HTMLButtonElement)) return;
+        var username = followButton.getAttribute("data-username") || "";
+        var busy = false;
+
+        function followersLink() {
+          var count = document.querySelector("[data-followers-count]");
+          return count && count.closest("a");
+        }
+
+        function paintCount(delta: number) {
+          var count = document.querySelector("[data-followers-count]");
+          if (!(count instanceof HTMLElement)) return;
+          var current = Number(count.textContent) || 0;
+          var next = Math.max(0, current + delta);
+          count.textContent = String(next);
+          var word = next === 1 ? "seguidor" : "seguidores";
+          var link = followersLink();
+          if (link instanceof HTMLAnchorElement) {
+            link.setAttribute("aria-label", next + " " + word);
+            var label = link.querySelector("[data-followers-label]");
+            if (label instanceof HTMLElement) label.textContent = word;
+          }
+        }
+
+        function paint(state: string, label: string) {
+          if (!(followButton instanceof HTMLButtonElement)) return;
+          var active = state === "following" || state === "confirm" || state === "busy";
+          followButton.setAttribute("data-following", active ? "true" : "false");
+          followButton.setAttribute("aria-pressed", state === "idle" ? "false" : "true");
+          followButton.setAttribute(
+            "aria-label",
+            state === "idle"
+              ? "Seguir @" + username
+              : state === "confirm"
+                ? "Confirmar: deixar de seguir @" + username
+                : state === "busy"
+                  ? "Removendo @" + username
+                  : "Deixar de seguir @" + username,
+          );
+          followButton.classList.toggle("btn-primary", state === "following" || state === "busy");
+          followButton.classList.toggle("btn-outline", state !== "following" && state !== "busy");
+          followButton.textContent = label;
+        }
+
+        function fail(message: string) {
+          if (followStatus) followStatus.textContent = message;
+        }
+
+        function goLogin() {
+          window.location.href = "/entrar?next=" + encodeURIComponent("/u/" + username);
+        }
+
+        function request(method: string, body: { username: string }, onOk: (data: unknown) => void, onFail: () => void) {
+          if (!(followButton instanceof HTMLButtonElement)) return;
+          busy = true;
+          followButton.setAttribute("disabled", "");
+          if (followStatus) followStatus.textContent = "";
+          fetch("/api/follows", {
+            method: method,
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+            .then(function (response) {
+              if (response.status === 401) {
+                goLogin();
+                return null;
+              }
+              if (!response.ok) throw new Error("HTTP " + response.status);
+              return response.json();
+            })
+            .then(function (data) {
+              if (!data) return;
+              busy = false;
+              if (!(followButton instanceof HTMLButtonElement)) return;
+              followButton.removeAttribute("disabled");
+              onOk(data);
+            })
+            .catch(function () {
+              busy = false;
+              if (!(followButton instanceof HTMLButtonElement)) return;
+              followButton.removeAttribute("disabled");
+              onFail();
+            });
+        }
+
+        followButton.addEventListener("click", function () {
+          if (!(followButton instanceof HTMLButtonElement)) return;
+          if (busy || !username) return;
+          var following = followButton.getAttribute("data-following") === "true";
+          var armed = followButton.getAttribute("data-armed") === "true";
+          if (!following) {
+            paint("following", "Seguindo...");
+            request(
+              "POST",
+              { username: username },
+              function () {
+                if (!(followButton instanceof HTMLButtonElement)) return;
+                followButton.removeAttribute("data-armed");
+                paint("following", "✓ Seguindo");
+                paintCount(1);
+              },
+              function () {
+                paint("idle", "Seguir");
+                fail("Não foi possível seguir este perfil.");
+              },
+            );
+            return;
+          }
+          if (!armed) {
+            followButton.setAttribute("data-armed", "true");
+            paint("confirm", "Deixar de seguir?");
+            return;
+          }
+          paint("busy", "Removendo…");
+          request(
+            "DELETE",
+            { username: username },
+            function () {
+              if (!(followButton instanceof HTMLButtonElement)) return;
+              followButton.removeAttribute("data-armed");
+              paint("idle", "Seguir");
+              paintCount(-1);
+            },
+            function () {
+              paint("following", "✓ Seguindo");
+              fail("Não foi possível deixar de seguir.");
+            },
+          );
+        });
+      })();
+    }
+
+    var blockButton = document.getElementById("block-button") as HTMLButtonElement | null;
+    var blockStatus = document.getElementById("block-status") as HTMLElement | null;
+    if (blockButton instanceof HTMLButtonElement) {
+      (function initBlock() {
+        if (!(blockButton instanceof HTMLButtonElement)) return;
+        var username = blockButton.getAttribute("data-username") || "";
+        var busy = false;
+
+        function paintBlock(state: string, label: string) {
+          if (!(blockButton instanceof HTMLButtonElement)) return;
+          blockButton.setAttribute("data-armed", state === "confirm" ? "true" : "false");
+          blockButton.setAttribute(
+            "aria-label",
+            state === "confirm" ? "Confirmar bloqueio" : "Bloquear usuário",
+          );
+          blockButton.textContent = label;
+        }
+
+        blockButton.addEventListener("click", function () {
+          if (!(blockButton instanceof HTMLButtonElement)) return;
+          if (busy || !username) return;
+          var armed = blockButton.getAttribute("data-armed") === "true";
+          if (!armed) {
+            blockButton.setAttribute("data-armed", "true");
+            paintBlock("confirm", "Confirmar bloqueio");
+            if (blockStatus) {
+              blockStatus.textContent =
+                "Vocês deixarão de se seguir e não poderão encontrar o perfil um do outro " +
+                "nem iniciar novas interações enquanto o bloqueio estiver ativo. " +
+                "Comentários e outras interações existentes não serão apagados. " +
+                "Desbloquear depois não restaura os follows.";
+              blockStatus.classList.remove("hidden");
+            }
+            return;
+          }
+          busy = true;
+          blockButton.setAttribute("disabled", "");
+          blockButton.textContent = "Bloqueando…";
+          fetch("/api/blocks", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: username }),
+          })
+            .then(function (response) {
+              if (response.status === 401) {
+                window.location.href = "/entrar?next=" + encodeURIComponent("/u/" + username);
+                return null;
+              }
+              if (!response.ok) throw new Error("HTTP " + response.status);
+              return response.json();
+            })
+            .then(function (data) {
+              if (!data) return;
+              window.location.href = "/perfil/bloqueados?notice=blocked";
+            })
+            .catch(function () {
+              busy = false;
+              if (!(blockButton instanceof HTMLButtonElement)) return;
+              blockButton.removeAttribute("disabled");
+              paintBlock("idle", "Bloquear usuário");
+              if (blockStatus) {
+                blockStatus.textContent = "Não foi possível bloquear este usuário.";
+                blockStatus.classList.remove("hidden");
+              }
+            });
+        });
+      })();
+    }
+
+    var shareButton = document.getElementById("public-share") as HTMLButtonElement | null;
+    var shareStatus = document.getElementById("public-share-status") as HTMLElement | null;
+    if (shareButton instanceof HTMLButtonElement) {
+      shareButton.addEventListener("click", function () {
+        if (!(shareButton instanceof HTMLButtonElement)) return;
+        var path = shareButton.getAttribute("data-share-url") || window.location.pathname;
+        var url = window.location.origin + path;
+        function done(message: string) {
+          if (shareStatus) shareStatus.textContent = message;
+        }
+        if (navigator.share) {
+          navigator.share({ url: url }).then(
+            function () {},
+            function () {},
+          );
+          return;
+        }
+        function fallbackCopy() {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(
+              function () { done("Link copiado."); },
+              function () { done("Não foi possível copiar o link."); },
+            );
+            return;
+          }
+          var input = document.createElement("input");
+          input.value = url;
+          document.body.appendChild(input);
+          input.select();
+          try {
+            var docWithExec = document as { execCommand: (commandId: string) => boolean };
+            docWithExec.execCommand("copy");
+            done("Link copiado.");
+          } catch {
+            done("Não foi possível copiar o link.");
+          }
+          document.body.removeChild(input);
+        }
+        fallbackCopy();
+      });
+    }
+
+    var moreButton = document.querySelector("[data-public-more]") as HTMLButtonElement | null;
+    var grid = document.getElementById("public-grid") as HTMLElement | null;
+    var status = document.querySelector("[data-public-status]");
+    var moreStatus = document.querySelector("[data-public-more-status]");
+    var template = document.getElementById("public-card-template") as HTMLTemplateElement | null;
+    if (!(moreButton instanceof HTMLButtonElement) || !(grid instanceof HTMLElement)) return;
+
+    var username = moreButton.getAttribute("data-username") ?? "";
+    var kind = moreButton.getAttribute("data-kind") ?? "watched";
+    var nextPage = Number(moreButton.getAttribute("data-next-page") ?? "2");
+    var loading = false;
+
+    function seenKeys(): Set<string> {
+      if (!(grid instanceof HTMLElement)) return new Set<string>();
+      var keys = new Set<string>();
+      grid.querySelectorAll("[data-public-card]").forEach(function (el) {
+        var key = el.getAttribute("data-key");
+        if (key) keys.add(key);
+      });
+      return keys;
+    }
+
+    function paintStars(root: ParentNode, rating: number) {
+      var stars = root.querySelectorAll("[data-star]");
+      for (var i = 0; i < stars.length; i++) {
+        var star = stars[i];
+        var on = Number(star.getAttribute("data-star")) <= rating;
+        star.classList.toggle("fill-amber-400", on);
+        star.classList.toggle("text-amber-400", on);
+        star.classList.toggle("fill-transparent", !on);
+        star.classList.toggle("text-base-content/30", !on);
+      }
+    }
+
+    function buildCard(item: { mediaType: string; tmdbId: number; title: string; year?: unknown; posterUrl?: unknown; rating?: unknown; reviewText?: unknown; likeCount?: unknown; likedByViewer?: unknown; commentCount?: unknown; commentsEnabled?: unknown }) {
+      if (!(template instanceof HTMLTemplateElement)) return null;
+      if (!(grid instanceof HTMLElement)) return null;
+      var node = template.content.cloneNode(true);
+      if (!(node instanceof DocumentFragment)) return null;
+      var typeLabel = item.mediaType === "tv" ? "Série" : "Filme";
+      var li = node.querySelector("[data-public-card]");
+      if (li instanceof HTMLElement) {
+        li.setAttribute("data-key", item.mediaType + ":" + item.tmdbId);
+      }
+      var link = node.querySelector('[data-role="link"]');
+      if (link instanceof HTMLAnchorElement) {
+        link.href = "/titulo/" + item.mediaType + "/" + item.tmdbId;
+        link.setAttribute(
+          "aria-label",
+          item.title + ", " + typeLabel.toLowerCase() +
+            (typeof item.year === "number" ? " de " + item.year : "") +
+            (typeof item.rating === "number" ? ", nota " + item.rating + " de 5" : ""),
+        );
+      }
+      if (typeof item.posterUrl === "string" && item.posterUrl.length > 0) {
+        var img = node.querySelector('[data-role="img"]');
+        if (img instanceof HTMLImageElement) {
+          img.src = item.posterUrl;
+          img.alt = "Pôster de " + item.title;
+          img.removeAttribute("hidden");
+        }
+      }
+      var title = node.querySelector('[data-role="title"]');
+      if (title) title.textContent = item.title;
+      var meta = node.querySelector('[data-role="meta"]');
+      if (meta instanceof HTMLElement) {
+        meta.textContent =
+          (typeof item.year === "number" ? item.year + " · " : "") + typeLabel;
+      }
+      if (typeof item.rating === "number") {
+        var stars = node.querySelector('[data-role="stars"]');
+        if (stars instanceof HTMLElement) {
+          stars.classList.remove("hidden");
+          stars.classList.add("flex");
+        }
+        paintStars(node, item.rating);
+      }
+      if (typeof item.reviewText === "string" && item.reviewText.length > 0) {
+        var review = node.querySelector('[data-role="review"]');
+        if (review instanceof HTMLElement) {
+          review.textContent = item.reviewText;
+          review.removeAttribute("hidden");
+        }
+      }
+      // Curtida (Etapa 18): só avaliações com likeCount numérico, via
+      // builder compartilhado. No próprio perfil, controle estático
+      // (sem self-like — igual ao SSR).
+      var likeSlot = node.querySelector('[data-role="like-slot"]');
+      var likeApi = (window as { CineVeeRatingLikes?: { buildControl: (target: { username: string; mediaType: string; tmdbId: number; likeCount: number; likedByViewer: boolean; interactive: boolean }) => Element | null } }).CineVeeRatingLikes;
+      var viewerIsSelf = grid.getAttribute("data-viewer-is-self") === "true";
+      if (
+        likeSlot instanceof HTMLElement && likeApi &&
+        (kind === "ratings" || typeof item.rating === "number") &&
+        typeof item.likeCount === "number"
+      ) {
+        var likeControl = likeApi.buildControl({
+          username: username,
+          mediaType: item.mediaType,
+          tmdbId: item.tmdbId,
+          likeCount: item.likeCount,
+          likedByViewer: item.likedByViewer === true,
+          interactive: !viewerIsSelf,
+        });
+        if (likeControl) likeSlot.appendChild(likeControl);
+      }
+      // Comentários (Etapa 19): só avaliações com commentCount
+      // numérico, via builder compartilhado. Dono também expande
+      // (lê e modera — o composer some via isOwner do GET).
+      var commentsSlot = node.querySelector('[data-role="comments-slot"]');
+      var commentsApi = (window as { CineVeeRatingComments?: { buildControl: (target: { username: string; mediaType: string; tmdbId: number; commentCount: number; commentsEnabled: boolean }) => Element | null } }).CineVeeRatingComments;
+      if (
+        commentsSlot instanceof HTMLElement && commentsApi &&
+        (kind === "ratings" || typeof item.rating === "number") &&
+        typeof item.commentCount === "number"
+      ) {
+        var commentsControl = commentsApi.buildControl({
+          username: username,
+          mediaType: item.mediaType,
+          tmdbId: item.tmdbId,
+          commentCount: item.commentCount,
+          commentsEnabled: item.commentsEnabled === true,
+        });
+        if (commentsControl) commentsSlot.appendChild(commentsControl);
+      }
+      return node;
+    }
+
+    function setLoading(on: boolean) {
+      if (!(moreButton instanceof HTMLButtonElement)) return;
+      loading = on;
+      if (on) {
+        moreButton.setAttribute("disabled", "");
+        moreButton.textContent = "Carregando...";
+      } else {
+        moreButton.removeAttribute("disabled");
+        moreButton.textContent = "Carregar mais";
+      }
+    }
+
+    moreButton.addEventListener("click", function () {
+      if (!(moreButton instanceof HTMLButtonElement)) return;
+      if (!(grid instanceof HTMLElement)) return;
+      if (loading || !username) return;
+      setLoading(true);
+      if (moreStatus) moreStatus.textContent = "";
+      var url = "/api/public/profile/" + encodeURIComponent(username) + "/" + kind +
+        "?page=" + encodeURIComponent(String(nextPage));
+      fetch(url, { credentials: "same-origin" })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(function (data) {
+          if (!(grid instanceof HTMLElement)) return;
+          if (!(moreButton instanceof HTMLButtonElement)) return;
+          var items = data && Array.isArray(data.items) ? data.items : [];
+          var known = seenKeys();
+          for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (!item || typeof item !== "object") continue;
+            if (typeof item.tmdbId !== "number" || (item.mediaType !== "movie" && item.mediaType !== "tv")) continue;
+            if (typeof item.title !== "string" || item.title.length === 0) continue;
+            var key = item.mediaType + ":" + item.tmdbId;
+            if (known.has(key)) continue;
+            known.add(key);
+            var node = buildCard(item);
+            if (node) grid.appendChild(node);
+          }
+          var total = grid.querySelectorAll("[data-public-card]").length;
+          if (status) status.textContent = "Mostrando " + total + " título" + (total === 1 ? "" : "s");
+          if (data && data.hasMore === true) {
+            nextPage += 1;
+            setLoading(false);
+          } else {
+            moreButton.remove();
+            if (moreStatus) moreStatus.textContent = "";
+          }
+        })
+        .catch(function () {
+          setLoading(false);
+          if (moreStatus) moreStatus.textContent = "Não foi possível carregar mais agora. Tente de novo.";
+        });
+    });
+  })();
+</script>
+
+<style>
+  .cinevee-no-scrollbar {
+    scrollbar-width: none;
+  }
+  .cinevee-no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+</style>

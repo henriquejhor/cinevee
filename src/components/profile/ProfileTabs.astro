@@ -1,0 +1,100 @@
+---
+/**
+ * Abas do perfil — UM componente, todas as telas.
+ *
+ * Desktop: linha horizontal normal.
+ * Mobile: overflow-x-auto sem quebrar linha (mesmo markup).
+ * Ativa: texto forte + primary + indicator discreto (sem pills).
+ */
+
+interface Props {
+  active: "overview" | "about" | "list" | "watched" | "ratings";
+}
+
+const { active } = Astro.props;
+
+const linkBase =
+  "inline-flex min-h-12 items-center gap-2 whitespace-nowrap border-b-2 px-1 py-3 text-sm font-semibold transition-colors duration-200";
+const linkOn = "border-primary text-base-content";
+const linkOff =
+  "border-transparent text-base-content/60 hover:border-base-300 hover:text-base-content";
+---
+
+<nav aria-label="Seções do perfil" class="mt-8 border-b border-base-300/60">
+  <ul class="cinevee-no-scrollbar -mb-px flex gap-6 overflow-x-auto">
+    <li class="shrink-0">
+      {
+        active === "overview" ? (
+          <span aria-current="page" class:list={[linkBase, linkOn]}>
+            Visão geral
+          </span>
+        ) : (
+          <a href="/perfil" class:list={[linkBase, linkOff]}>
+            Visão geral
+          </a>
+        )
+      }
+    </li>
+    <li class="shrink-0">
+      {
+        active === "about" ? (
+          <span aria-current="page" class:list={[linkBase, linkOn]}>
+            Sobre
+          </span>
+        ) : (
+          <a href="/perfil/sobre" class:list={[linkBase, linkOff]}>
+            Sobre
+          </a>
+        )
+      }
+    </li>
+    <li class="shrink-0">
+      {
+        active === "list" ? (
+          <span aria-current="page" class:list={[linkBase, linkOn]}>
+            Minha Lista
+          </span>
+        ) : (
+          <a href="/perfil/lista" class:list={[linkBase, linkOff]}>
+            Minha Lista
+          </a>
+        )
+      }
+    </li>
+    <li class="shrink-0">
+      {
+        active === "watched" ? (
+          <span aria-current="page" class:list={[linkBase, linkOn]}>
+            Assistidos
+          </span>
+        ) : (
+          <a href="/perfil/assistidos" class:list={[linkBase, linkOff]}>
+            Assistidos
+          </a>
+        )
+      }
+    </li>
+    <li class="shrink-0">
+      {
+        active === "ratings" ? (
+          <span aria-current="page" class:list={[linkBase, linkOn]}>
+            Avaliações
+          </span>
+        ) : (
+          <a href="/perfil/avaliacoes" class:list={[linkBase, linkOff]}>
+            Avaliações
+          </a>
+        )
+      }
+    </li>
+  </ul>
+</nav>
+
+<style>
+  .cinevee-no-scrollbar {
+    scrollbar-width: none;
+  }
+  .cinevee-no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+</style>

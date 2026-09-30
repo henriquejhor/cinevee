@@ -1,0 +1,72 @@
+---
+/**
+ * Controle de curtida em avaliação (Etapa 18).
+ * Reutilizado no feed, no perfil público e nos cards client-side.
+ * Interativo (<button>) ou estático (<span>, ex.: dono vendo o próprio
+ * perfil). Anon clica → API 401 → redirect login (tratado na delegation).
+ * Sem display_name no aria-label (evita hardening de XSS em rótulos).
+ */
+interface Props {
+  username: string;
+  mediaType: "movie" | "tv";
+  tmdbId: number;
+  likeCount: number;
+  likedByViewer: boolean;
+  /** false = ícone/count estático (dono, sem self-like). */
+  interactive?: boolean;
+}
+
+const {
+  username,
+  mediaType,
+  tmdbId,
+  likeCount,
+  likedByViewer,
+  interactive = true,
+} = Astro.props;
+const liked = likedByViewer === true;
+const count = Number.isSafeInteger(likeCount) && likeCount >= 0 ? likeCount : 0;
+---
+
+{
+  interactive ? (
+    <button
+      type="button"
+      data-rating-like
+      data-rating-owner-username={username}
+      data-rating-media-type={mediaType}
+      data-rating-tmdb-id={tmdbId}
+      data-liked={liked ? "true" : "false"}
+      aria-pressed={liked ? "true" : "false"}
+      aria-label={liked ? "Remover curtida da avaliação" : "Curtir avaliação"}
+      class="inline-flex min-h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm transition-opacity hover:bg-base-200"
+    >
+      <span
+        data-role="like-glyph"
+        aria-hidden="true"
+        class:list={["text-base", liked ? "text-primary" : "text-base-content/60"]}
+      >
+        {liked ? "♥" : "♡"}
+      </span>
+      <span data-role="like-count" class="font-semibold tabular-nums text-base-content/80">
+        {count}
+      </span>
+    </button>
+  ) : (
+    <span
+      data-rating-like-static
+      data-rating-owner-username={username}
+      data-rating-media-type={mediaType}
+      data-rating-tmdb-id={tmdbId}
+      class="inline-flex min-h-12 min-w-12 items-center gap-1.5 rounded-full px-3 text-sm"
+      aria-label={`${count} ${count === 1 ? "curtida" : "curtidas"}`}
+    >
+      <span data-role="like-glyph" aria-hidden="true" class="text-base text-base-content/60">
+        ♡
+      </span>
+      <span data-role="like-count" class="font-semibold tabular-nums text-base-content/80">
+        {count}
+      </span>
+    </span>
+  )
+}

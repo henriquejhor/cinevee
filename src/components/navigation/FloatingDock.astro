@@ -1,0 +1,76 @@
+---
+const pathname = Astro.url.pathname;
+
+function isCurrent(href: string): boolean {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+const items: { href: string; label: string; icon: string }[] = [
+  {
+    href: "/",
+    label: "Início",
+    icon: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>',
+  },
+  {
+    href: "/buscar",
+    label: "Buscar",
+    icon: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  },
+  {
+    href: "/descobrir",
+    label: "Descobrir",
+    icon: '<path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5 19 19M19 5l-2.5 2.5M7.5 16.5 5 19"/><circle cx="12" cy="12" r="3.2"/>',
+  },
+  {
+    href: "/perfil",
+    label: "Perfil",
+    icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/>',
+  },
+];
+---
+
+<nav
+  aria-label="Navegação principal"
+  class="fixed left-1/2 bottom-[var(--cinevee-dock-offset)] z-50 w-[calc(100%-2rem)] max-w-[20rem] -translate-x-1/2"
+>
+  <ul
+    class="flex w-full items-center justify-between gap-1 rounded-full border border-base-300 bg-base-200/80 py-1.5 pl-1.5 pr-2 shadow-lg backdrop-blur-xl"
+  >
+    {
+      items.map((item) => {
+        const current = isCurrent(item.href);
+        return (
+          <li>
+            <a
+              href={item.href}
+              aria-label={item.label}
+              aria-current={current ? "page" : undefined}
+              class:list={[
+                "cinevee-dock-item flex items-center justify-center gap-2 rounded-full px-3",
+                current ? "bg-primary text-primary-content" : "text-base-content/70 hover:text-base-content",
+              ]}
+            >
+              <svg
+                aria-hidden="true"
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <Fragment set:html={item.icon} />
+              </svg>
+              <span class="cinevee-dock-label" aria-hidden="true">
+                <span class="text-sm font-semibold">{item.label}</span>
+              </span>
+            </a>
+          </li>
+        );
+      })
+    }
+  </ul>
+</nav>

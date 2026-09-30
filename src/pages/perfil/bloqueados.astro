@@ -1,0 +1,318 @@
+---
+/**
+ * /perfil/bloqueados — management privada de bloqueios (Etapa 23).
+ * Protegida por login. SSR da primeira página (24 + probe no client).
+ * Sem links para perfis enquanto o block estiver ativo (mesmo que o
+ * target esteja público — evita reentrada acidental).
+ */
+import "../../styles/global.css";
+import Layout from "../../layouts/Layout.astro";
+import AppHeader from "../../components/navigation/AppHeader.astro";
+import { getUserProfile } from "../../lib/profile/service";
+import {
+  getBlocksSession,
+  getMyBlockedUsersPage,
+} from "../../lib/blocks/service";
+import { BLOCKS_PAGE_SIZE } from "../../lib/blocks/types";
+
+export const prerender = false;
+
+const { user } = await getUserProfile(Astro.request, Astro.cookies);
+
+if (!user) {
+  return Astro.redirect("/entrar?next=/perfil/bloqueados", 303);
+}
+
+const session = await getBlocksSession(Astro.request, Astro.cookies);
+
+let loadError = false;
+let items: Awaited<ReturnType<typeof getMyBlockedUsersPage>>["items"] = [];
+let hasMore = false;
+
+if (session) {
+  try {
+    const page = await getMyBlockedUsersPage(session, 1, BLOCKS_PAGE_SIZE);
+    items = page.items;
+    hasMore = page.hasMore;
+  } catch {
+    loadError = true;
+  }
+} else {
+  loadError = true;
+}
+
+function initials(name: string | null): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.charAt(0) ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.charAt(0) ?? "") : "";
+  return (first + last).toUpperCase() || "?";
+}
+
+function relativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const diff = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (diff < 60) return "agora mesmo";
+  const minutes = Math.floor(diff / 60);
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "há 1 dia";
+  if (days < 7) return `há ${days} dias`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return weeks === 1 ? "há 1 sem" : `há ${weeks} sem`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return months === 1 ? "há 1 mês" : `há ${months} meses`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? "há 1 ano" : `há ${years} anos`;
+}
+---
+
+<Layout title="Usuários bloqueados — CineVee" description="Gerencie os usuários que você bloqueou." noindex>
+  <AppHeader />
+  <main class="mx-auto w-full max-w-2xl px-4 pb-32 pt-10 sm:px-6 sm:pt-14">
+    <nav aria-label="Navegação" class="mb-6">
+      <a
+        href="/perfil"
+        class="inline-flex min-h-12 min-w-12 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-base-content/70 hover:bg-base-200 hover:text-base-content"
+      >
+        Voltar ao perfil
+      </a>
+    </nav>
+
+    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Sua conta</p>
+    <h1 class="mt-3 text-3xl font-extrabold tracking-tight">Usuários bloqueados</h1>
+    <p class="mt-1 text-sm text-base-content/60">
+      Vocês não se encontram na busca nem interagem enquanto o bloqueio estiver ativo.
+    </p>
+
+    <p id="blocked-status" role="status" aria-live="polite" style="display: none" class="mt-4 rounded-2xl border px-4 py-3 text-sm"></p>
+
+    {
+      loadError ? (
+        <div class="mt-6 rounded-2xl border border-base-300 bg-base-200/40 px-5 py-8 text-center">
+          <p class="text-sm font-semibold">Não foi possível carregar seus bloqueios agora.</p>
+          <a href="/perfil/bloqueados" class="btn btn-primary mt-4 min-h-12 rounded-full px-8 text-sm font-semibold">
+            Tentar novamente
+          </a>
+        </div>
+      ) : items.length === 0 ? (
+        <div class="mt-6 rounded-2xl border border-base-300/60 bg-base-200/40 px-5 py-8 text-center">
+          <p class="text-sm font-semibold">Nenhum usuário bloqueado.</p>
+        </div>
+      ) : (
+        <ul id="blocked-list" aria-label="Usuários bloqueados" class="mt-6 flex flex-col gap-3">
+          {
+            items.map((item) => {
+              const name = item.displayName?.trim() || (item.username ? `@${item.username}` : "Usuário bloqueado");
+              return (
+                <li
+                  data-block-id={item.blockId}
+                  class="flex items-center gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3"
+                >
+                  <span
+                    aria-hidden="true"
+                    class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base-300 text-sm font-extrabold text-base-content/60"
+                  >
+                    {initials(item.displayName ?? item.username)}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate break-words text-sm font-semibold leading-snug">{name}</p>
+                    <p class="mt-0.5 text-xs text-base-content/60">
+                      {item.username && <span class="mr-2">@{item.username}</span>}
+                      <span>Bloqueado <time datetime={item.blockedAt}>{relativeTime(item.blockedAt)}</time></span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    data-role="blocked-unblock"
+                    data-block-id={item.blockId}
+                    aria-label="Desbloquear usuário"
+                    class="btn btn-outline min-h-12 shrink-0 rounded-full px-6 text-sm"
+                  >
+                    Desbloquear
+                  </button>
+                </li>
+              );
+            })
+          }
+        </ul>
+      )
+    }
+    {
+      hasMore && (
+        <div class="mt-6 flex flex-col items-center gap-3">
+          <button
+            id="blocked-more"
+            type="button"
+            data-next-page="2"
+            class="btn btn-outline min-h-12 rounded-full px-10"
+          >
+            Carregar mais
+          </button>
+          <p id="blocked-more-status" role="status" class="min-h-5 text-xs text-base-content/60" />
+        </div>
+      )
+    }
+  </main>
+</Layout>
+
+<script>
+  // Gestão de bloqueios: unblock remove o card (sem navegar ao perfil).
+  (function () {
+    var list = document.getElementById("blocked-list") as HTMLElement | null;
+    var more = document.getElementById("blocked-more") as HTMLButtonElement | null;
+    var moreStatus = document.getElementById("blocked-more-status") as HTMLElement | null;
+    var status = document.getElementById("blocked-status") as HTMLElement | null;
+
+    function announce(message: string, ok: boolean) {
+      if (!status) return;
+      status.textContent = message;
+      status.style.display = "";
+      status.className =
+        "mt-4 rounded-2xl border px-4 py-3 text-sm " +
+        (ok ? "border-success/40 bg-success/10" : "border-error/40 bg-error/10");
+    }
+
+    // Feedback pós-block (?notice=blocked) — consome o parâmetro.
+    try {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get("notice") === "blocked") {
+        announce("Usuário bloqueado.", true);
+        params.delete("notice");
+        var clean = window.location.pathname + (params.toString() ? "?" + params.toString() : "");
+        window.history.replaceState(null, "", clean);
+      }
+    } catch {
+      // Sem feedback: a lista fala por si.
+    }
+
+    function showStatus(message: string) {
+      if (!status) return;
+      status.textContent = message;
+      status.style.display = "";
+      status.className = "mt-4 rounded-2xl border border-base-300 px-4 py-3 text-sm";
+    }
+
+    document.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof Element)) return;
+      var button = target.closest('[data-role="blocked-unblock"]');
+      if (!(button instanceof HTMLButtonElement)) return;
+      if (button.hasAttribute("disabled")) return;
+      var blockId = Number(button.getAttribute("data-block-id"));
+      if (!Number.isSafeInteger(blockId) || blockId < 1) return;
+      button.setAttribute("disabled", "");
+      var original = button.textContent;
+      button.textContent = "Desbloqueando…";
+      fetch("/api/blocks", {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockId: blockId }),
+      })
+        .then(function (res) {
+          if (res.status === 401) {
+            window.location.href = "/entrar?next=" + encodeURIComponent("/perfil/bloqueados");
+            return null;
+          }
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (data: unknown) {
+          if (!data || typeof data !== "object") return;
+          if (!(button instanceof HTMLButtonElement)) return;
+          var card = button.closest("[data-block-id]");
+          if (card) card.remove();
+          showStatus("Usuário desbloqueado.");
+        })
+        .catch(function () {
+          if (button instanceof HTMLButtonElement) {
+            button.removeAttribute("disabled");
+            button.textContent = original;
+          }
+          announce("Não foi possível desbloquear este usuário.", false);
+        });
+    });
+
+    if (more instanceof HTMLButtonElement && list) {
+      more.addEventListener("click", function () {
+        if (!(more instanceof HTMLButtonElement) || more.hasAttribute("disabled")) return;
+        var next = Number(more.getAttribute("data-next-page") || "2");
+        if (!Number.isSafeInteger(next) || next < 1) return;
+        more.setAttribute("disabled", "");
+        if (moreStatus) moreStatus.textContent = "Carregando…";
+        fetch("/api/blocks?page=" + next + "&limit=24", { credentials: "same-origin" })
+          .then(function (res) {
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json();
+          })
+          .then(function (data: unknown) {
+            if (!data || typeof data !== "object") throw new Error("payload inválido");
+            if (!(list instanceof HTMLElement)) throw new Error("lista ausente");
+            var body = data as Record<string, unknown>;
+            var rawItems = Array.isArray(body.items) ? body.items : [];
+            var known = new Set<number>();
+            var existing = list.querySelectorAll("[data-block-id]");
+            for (var i = 0; i < existing.length; i++) {
+              var knownId = Number(existing[i].getAttribute("data-block-id"));
+              if (Number.isSafeInteger(knownId)) known.add(knownId);
+            }
+            for (var j = 0; j < rawItems.length; j++) {
+              var raw = rawItems[j];
+              if (typeof raw !== "object" || raw === null) continue;
+              var record = raw as Record<string, unknown>;
+              var id = record.blockId;
+              if (typeof id !== "number" || !Number.isSafeInteger(id) || known.has(id)) continue;
+              known.add(id);
+              var li = document.createElement("li");
+              li.setAttribute("data-block-id", String(id));
+              li.className = "flex items-center gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3";
+              var avatar = document.createElement("span");
+              avatar.setAttribute("aria-hidden", "true");
+              avatar.className = "flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base-300 text-sm font-extrabold text-base-content/60";
+              avatar.textContent = "?";
+              li.appendChild(avatar);
+              var box = document.createElement("div");
+              box.className = "min-w-0 flex-1";
+              var name = document.createElement("p");
+              name.className = "truncate break-words text-sm font-semibold leading-snug";
+              var shown =
+                typeof record.displayName === "string" && record.displayName.trim()
+                  ? record.displayName.trim()
+                  : typeof record.username === "string" && record.username
+                    ? "@" + record.username
+                    : "Usuário bloqueado";
+              name.textContent = shown;
+              box.appendChild(name);
+              li.appendChild(box);
+              var unblock = document.createElement("button");
+              unblock.setAttribute("type", "button");
+              unblock.setAttribute("data-role", "blocked-unblock");
+              unblock.setAttribute("data-block-id", String(id));
+              unblock.setAttribute("aria-label", "Desbloquear usuário");
+              unblock.className = "btn btn-outline min-h-12 shrink-0 rounded-full px-6 text-sm";
+              unblock.textContent = "Desbloquear";
+              li.appendChild(unblock);
+              if (list instanceof HTMLElement) list.appendChild(li);
+            }
+            if (!(more instanceof HTMLButtonElement)) return;
+            if (body.hasMore === true) {
+              more.setAttribute("data-next-page", String(next + 1));
+              more.removeAttribute("disabled");
+              if (moreStatus) moreStatus.textContent = "";
+            } else {
+              more.remove();
+              if (moreStatus) moreStatus.textContent = "Você viu todos os bloqueios.";
+            }
+          })
+          .catch(function () {
+            if (more instanceof HTMLButtonElement) more.removeAttribute("disabled");
+            if (moreStatus) moreStatus.textContent = "Não foi possível carregar. Tente de novo.";
+          });
+      });
+    }
+  })();
+</script>

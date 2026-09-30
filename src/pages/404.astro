@@ -1,0 +1,27 @@
+---
+/**
+ * 404 global — rota inexistente ou conteúdo removido.
+ * Estática e sem dados: nunca vaza motivo interno.
+ */
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+---
+<Layout title="Página não encontrada — CineVee" description="A página que você procurou não existe." noindex>
+  <AppHeader />
+  <main class="mx-auto w-full max-w-xl px-4 pb-32 pt-16 text-center sm:px-6">
+    <p class="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Erro 404</p>
+    <h1 class="mt-3 text-3xl font-extrabold tracking-tight">Página não encontrada</h1>
+    <p class="mt-2 text-sm leading-6 text-base-content/70">
+      O link pode estar quebrado ou o conteúdo não está mais disponível.
+    </p>
+    <p class="mt-6 flex flex-wrap items-center justify-center gap-3">
+      <a href="/" class="btn btn-primary min-h-12 rounded-full px-8 text-sm font-semibold">
+        Voltar ao início
+      </a>
+      <a href="/buscar" class="btn btn-outline min-h-12 rounded-full px-8 text-sm font-semibold">
+        Buscar títulos
+      </a>
+    </p>
+  </main>
+</Layout>

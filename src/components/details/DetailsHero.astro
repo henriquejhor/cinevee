@@ -1,0 +1,889 @@
+---
+/**
+ * Hero da página de detalhes: backdrop, pôster e coluna de informações.
+ *
+ * Mobile-first: tudo empilhado (backdrop → poster → título → metadados →
+ * gêneros → tagline → sinopse). No desktop, composição em duas colunas:
+ * poster à esquerda e TODA a informação à direita, com largura de leitura
+ * contida. O bloco de conteúdo sobrepõe a transição inferior do backdrop,
+ * formando uma composição única.
+ */
+import { formatRuntime, type ContentDetails } from "../../lib/tmdb/details";
+import type { Trailer } from "../../lib/tmdb/videos";
+import ReviewEditor from "../ratings/ReviewEditor.astro";
+
+interface Props {
+  details: ContentDetails;
+  /** `null` → a ação de trailer é omitida (sem botão, sem mensagem). */
+  trailer: Trailer | null;
+  /**
+   * Minha Lista (Etapa 4). Ausente → nenhuma ação de lista.
+   * `authenticated: false` → link para login com retorno;
+   * `true` → toggle sem reload (POST/DELETE /api/watchlist).
+   */
+  watchlist?: {
+    saved: boolean;
+    authenticated: boolean;
+    returnTo: string;
+  };
+  /**
+   * Já assisti (Etapa 6). Ausente → nenhuma ação de assistidos
+   * (ex.: tabela ainda não migrada — página continua íntegra).
+   * `authenticated: false` → link para login com retorno;
+   * `true` → toggle sem reload (POST/DELETE /api/watched).
+   * Marcar como assistido também tira o título da Minha Lista
+   * (backend); a interface sincroniza os dois botões sem reload.
+   */
+  watched?: {
+    watched: boolean;
+    authenticated: boolean;
+    returnTo: string;
+  };
+  /**
+   * Avaliação (Etapa 7) + opinião (Etapa 12). Ausente → nenhuma UI de
+   * avaliação (ex.: tabela ainda não migrada — página continua íntegra).
+   * `isWatched: false` → dica discreta (sem estrelas habilitadas, sem
+   * editor de opinião); `true` → radiogroup 1–5 (`value: null` = ainda
+   * sem nota) + editor "Sua opinião" (só após a primeira nota).
+   * `reviewText: null` = sem opinião.
+   */
+  rating?: {
+    value: number | null;
+    reviewText: string | null;
+    authenticated: boolean;
+    isWatched: boolean;
+  };
+}
+
+const { details, trailer, watchlist, watched, rating } = Astro.props;
+const typeLabel = details.type === "movie" ? "Filme" : "Série";
+const runtimeLabel = formatRuntime(details.runtime);
+const ratingLabel = details.rating ? details.rating.toFixed(1) : null;
+const ratingAccessible = details.rating
+  ? details.rating.toFixed(1).replace(".", ",")
+  : null;
+/** Títulos curtos ganham escala extra em telas grandes; longos não. */
+const titleDisplay = details.title.length <= 22 ? "lg:text-6xl" : "";
+const seriesLine =
+  details.type === "tv" && (details.seasons || details.episodes)
+    ? [
+        details.seasons
+          ? `${details.seasons} ${details.seasons === 1 ? "temporada" : "temporadas"}`
+          : null,
+        details.episodes
+          ? `${details.episodes} ${details.episodes === 1 ? "episódio" : "episódios"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
+---
+
+<div>
+  {
+    details.backdropUrl ? (
+      <div class="relative -mx-4 sm:-mx-6 lg:-mx-8">
+        <img
+          src={details.backdropUrl}
+          alt=""
+          width="1280"
+          height="720"
+          loading="eager"
+          fetchpriority="high"
+          class="aspect-video max-h-80 w-full object-cover sm:max-h-96"
+        />
+        <div
+          aria-hidden="true"
+          class="absolute inset-0 bg-gradient-to-t from-base-100 via-base-100/50 to-transparent"
+        />
+        <div aria-hidden="true" class="cinevee-vignette absolute inset-0" />
+        <div aria-hidden="true" class="cinevee-backdrop-aurora absolute inset-0" />
+        {/* Faixa de dissolução: o backdrop se dissolve no fundo abaixo da imagem. */}
+        <div
+          aria-hidden="true"
+          class="absolute inset-x-0 top-1/2 -bottom-24 bg-gradient-to-b from-transparent to-base-100 sm:-bottom-28"
+        />
+      </div>
+    ) : (
+      <div
+        aria-hidden="true"
+        class="relative -mx-4 flex aspect-video max-h-80 items-center justify-center bg-base-200 sm:-mx-6 lg:-mx-8"
+      >
+        <svg
+          aria-hidden="true"
+          class="h-12 w-12 text-base-content/20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <rect x="2" y="4" width="20" height="16" rx="2" />
+          <path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5" />
+        </svg>
+        <div
+          aria-hidden="true"
+          class="absolute inset-0 bg-gradient-to-t from-base-100 via-transparent to-transparent"
+        />
+      </div>
+    )
+  }
+
+  <div class="relative -mt-20 sm:-mt-24">
+    <div class="grid gap-6 md:grid-cols-[220px_minmax(0,1fr)] md:gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
+      {
+        details.posterUrl ? (
+          <img
+            src={details.posterUrl}
+            alt={`Pôster de ${details.title}`}
+            width="500"
+            height="750"
+            loading="eager"
+            class="aspect-[2/3] w-32 shrink-0 rounded-xl border border-white/10 object-cover shadow-xl sm:w-40 md:w-full"
+          />
+        ) : (
+          <div
+            aria-hidden="true"
+            class="cinevee-poster flex w-32 shrink-0 items-center justify-center sm:w-40 md:w-full"
+            style="--ph: 250"
+          >
+            <svg
+              aria-hidden="true"
+              class="h-10 w-10 text-white/25"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+            </svg>
+          </div>
+        )
+      }
+
+      <div class="min-w-0 max-w-[760px] md:pb-2">
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+          {typeLabel}
+        </p>
+        <h1
+          class:list={[
+            "mt-3 max-w-[18ch] text-balance text-4xl font-extrabold leading-[1.05] tracking-tight sm:max-w-[26ch] sm:text-5xl",
+            titleDisplay,
+          ]}
+        >
+          {details.title}
+        </h1>
+        {
+          details.originalTitle && (
+            <p class="mt-1 text-xs text-base-content/50">{details.originalTitle}</p>
+          )
+        }
+        {
+          (details.year || runtimeLabel || ratingLabel) && (
+            <p class="mt-3 flex flex-wrap items-center gap-x-3 text-sm text-base-content/70">
+              {details.year && <span class="text-base-content/60">{details.year}</span>}
+              {details.year && (runtimeLabel || ratingLabel) && (
+                <span aria-hidden="true">·</span>
+              )}
+              {runtimeLabel && (
+                <span class="text-base-content/60">
+                  {runtimeLabel}
+                  {details.type === "tv" && "/ep"}
+                </span>
+              )}
+              {runtimeLabel && ratingLabel && <span aria-hidden="true">·</span>}
+              {ratingLabel && (
+                <span class="font-semibold text-base-content">
+                  <span aria-hidden="true" class="text-primary">
+                    ★{" "}
+                  </span>
+                  <span class="sr-only">Nota {ratingAccessible} de 10: </span>
+                  {ratingLabel}
+                </span>
+              )}
+            </p>
+          )
+        }
+        {
+          seriesLine && (
+            <p class="mt-1 text-xs text-base-content/60 md:text-sm">{seriesLine}</p>
+          )
+        }
+
+        {
+          details.genres.length > 0 && (
+            <ul aria-label="Gêneros" class="mt-6 flex flex-wrap gap-2">
+              {details.genres.map((genre) => (
+                <li class="rounded-full border border-base-300 bg-base-200 px-3 py-1.5 text-xs font-medium text-base-content/80 md:text-sm">
+                  {genre}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+
+        {
+          (trailer || watchlist || watched) && (
+            <div class="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {trailer && (
+                <button
+                  type="button"
+                  data-trailer-open
+                  class="btn btn-primary min-h-12 w-full rounded-full px-6 sm:w-auto"
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M8 5.5v13l11-6.5-11-6.5Z" />
+                  </svg>
+                  Assistir trailer
+                </button>
+              )}
+              {watchlist && !watchlist.authenticated && (
+                <a
+                  href={`/entrar?next=${encodeURIComponent(watchlist.returnTo)}`}
+                  class="btn btn-outline min-h-12 w-full rounded-full px-6 sm:w-auto"
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M12 20.5C7 16.5 3 13.2 3 9.3 3 6.4 5.2 4.5 7.7 4.5c1.7 0 3.3.9 4.3 2.4 1-1.5 2.6-2.4 4.3-2.4 2.5 0 4.7 1.9 4.7 4.8 0 3.9-4 7.2-9 11.2Z" />
+                  </svg>
+                  Adicionar à lista
+                </a>
+              )}
+              {watchlist && watchlist.authenticated && (
+                <button
+                  type="button"
+                  data-watchlist-toggle
+                  data-tmdb-id={details.id}
+                  data-media-type={details.type}
+                  aria-pressed={watchlist.saved ? "true" : "false"}
+                  class:list={[
+                    "btn min-h-12 w-full rounded-full px-6 sm:w-auto",
+                    watchlist.saved ? "btn-primary" : "btn-outline",
+                  ]}
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class:list={[{ hidden: watchlist.saved }]}
+                  >
+                    <path d="M12 20.5C7 16.5 3 13.2 3 9.3 3 6.4 5.2 4.5 7.7 4.5c1.7 0 3.3.9 4.3 2.4 1-1.5 2.6-2.4 4.3-2.4 2.5 0 4.7 1.9 4.7 4.8 0 3.9-4 7.2-9 11.2Z" />
+                  </svg>
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    class:list={[{ hidden: !watchlist.saved }]}
+                    data-heart-filled
+                  >
+                    <path d="M12 20.5C7 16.5 3 13.2 3 9.3 3 6.4 5.2 4.5 7.7 4.5c1.7 0 3.3.9 4.3 2.4 1-1.5 2.6-2.4 4.3-2.4 2.5 0 4.7 1.9 4.7 4.8 0 3.9-4 7.2-9 11.2Z" />
+                  </svg>
+                  <span data-watchlist-label>
+                    {watchlist.saved ? "Na minha lista" : "Adicionar à lista"}
+                  </span>
+                </button>
+              )}
+              {watched && !watched.authenticated && (
+                <a
+                  href={`/entrar?next=${encodeURIComponent(watched.returnTo)}`}
+                  class="btn btn-outline min-h-12 w-full rounded-full px-6 sm:w-auto"
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  Já assisti
+                </a>
+              )}
+              {watched && watched.authenticated && (
+                <button
+                  type="button"
+                  data-watched-toggle
+                  data-tmdb-id={details.id}
+                  data-media-type={details.type}
+                  data-title={details.title}
+                  aria-pressed={watched.watched ? "true" : "false"}
+                  aria-label={
+                    watched.watched
+                      ? `Remover "${details.title}" dos assistidos`
+                      : `Marcar "${details.title}" como assistido`
+                  }
+                  class:list={[
+                    "btn min-h-12 w-full rounded-full px-6 sm:w-auto",
+                    watched.watched ? "cinevee-watched-on" : "btn-outline",
+                  ]}
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class:list={[{ hidden: watched.watched }]}
+                  >
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    class:list={[{ hidden: !watched.watched }]}
+                    data-check-filled
+                  >
+                    <path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span data-watched-label>
+                    {watched.watched ? "✓ Assistido" : "Já assisti"}
+                  </span>
+                </button>
+              )}
+            </div>
+          )
+        }
+
+        <p data-watchlist-status role="status" class="sr-only"></p>
+        <p data-watched-status role="status" class="sr-only"></p>
+
+        {
+          rating && rating.authenticated && (
+            <div
+              data-rating-root
+              data-tmdb-id={details.id}
+              data-media-type={details.type}
+              data-title={details.title}
+              class="mt-4"
+            >
+              <p data-rating-locked class:list={[{ hidden: rating.isWatched }]} class="text-sm text-base-content/60">
+                Marque como assistido para avaliar.
+              </p>
+              <div data-rating-form class:list={[{ hidden: !rating.isWatched }]}>
+                <p id="cinevee-rating-label" class="text-sm font-semibold">
+                  Sua avaliação
+                  <span data-rating-value class="ml-2 font-normal text-base-content/60">
+                    {rating.value ? `${rating.value} de 5` : ""}
+                  </span>
+                </p>
+                <div
+                  role="radiogroup"
+                  aria-labelledby="cinevee-rating-label"
+                  data-rating-group
+                  class="mt-1 flex items-center gap-1"
+                >
+                  {
+                    [1, 2, 3, 4, 5].map((n) => (
+                      <label
+                        data-star-label={n}
+                        class="flex min-h-12 min-w-12 cursor-pointer items-center justify-center rounded-lg"
+                      >
+                        <input
+                          type="radio"
+                          name={`rating-${details.type}-${details.id}`}
+                          value={n}
+                          checked={rating.value === n}
+                          aria-label={`${n} de 5 estrelas`}
+                          class="peer sr-only"
+                        />
+                        <svg
+                          aria-hidden="true"
+                          width="28"
+                          height="28"
+                          viewBox="0 0 24 24"
+                          data-star={n}
+                          class:list={[
+                            "transition-colors duration-150 peer-focus-visible:ring-2 peer-focus-visible:ring-primary peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-base-100 rounded",
+                            rating.value !== null && n <= rating.value
+                              ? "fill-amber-400 text-amber-400"
+                              : "fill-transparent text-base-content/30",
+                          ]}
+                          fill="currentColor"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                        </svg>
+                      </label>
+                    ))
+                  }
+                </div>
+                <div class="mt-1 min-h-12">
+                  <button
+                    type="button"
+                    data-rating-remove
+                    class:list={[
+                      "inline-flex min-h-12 items-center rounded-lg px-1 text-sm text-base-content/60 underline-offset-4 hover:text-error hover:underline",
+                      { hidden: rating.value === null },
+                    ]}
+                    aria-label={rating.reviewText ? `Remover avaliação e opinião de ${details.title} (mantém em Assistidos)` : `Remover avaliação de ${details.title} (mantém em Assistidos)`}
+                    title={rating.reviewText ? "Remover esta avaliação e sua opinião?" : "Remover avaliação"}
+                  >
+                    Remover avaliação
+                  </button>
+                </div>
+                <p data-rating-status role="status" class="sr-only"></p>
+                {
+                  /* Sua opinião (Etapa 12): sempre no DOM dentro do form
+                     (o form inteiro some quando não assistido — só a dica
+                     "Marque como assistido para avaliar." aparece).
+                     Com nota → editor; sem nota → dica discreta. O script
+                     da página alterna os dois sem reload ao avaliar/desavaliar ou ao
+                     marcar/desmarcar assistido (cascade limpa o editor). */
+                }
+                <div
+                  data-review-section
+                  class:list={[
+                    "mt-4 border-t border-base-300/60 pt-4",
+                    { hidden: !rating.isWatched || rating.value === null },
+                  ]}
+                >
+                  <ReviewEditor
+                    tmdbId={details.id}
+                    mediaType={details.type}
+                    value={rating.reviewText}
+                    editorId={`details-${details.type}-${details.id}`}
+                  />
+                </div>
+                <p
+                  data-review-gate
+                  class:list={[
+                    "mt-4 text-sm text-base-content/60",
+                    { hidden: !rating.isWatched || rating.value !== null },
+                  ]}
+                >
+                  Avalie com estrelas para poder escrever sua opinião.
+                </p>
+              </div>
+            </div>
+          )
+        }
+
+        {
+          details.tagline && (
+            <p class="mt-6 border-l-2 border-primary/40 pl-3 text-pretty text-sm italic text-base-content/60">
+              &ldquo;{details.tagline}&rdquo;
+            </p>
+          )
+        }
+
+        <section aria-labelledby="sinopse" class="mt-8">
+          <h2 id="sinopse" class="text-xl font-bold tracking-tight">
+            Sinopse
+          </h2>
+          <p class="mt-2 max-w-2xl text-pretty text-base leading-7 text-base-content/80">
+            {details.overview ?? "Sinopse indisponível em português."}
+          </p>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Toggles sem reload: Minha Lista (POST/DELETE /api/watchlist) e
+  // Já assisti (POST/DELETE /api/watched). Estado inicial vem do servidor
+  // (aria-pressed). Nenhum user_id no browser. Marcar como assistido tira
+  // o título da Minha Lista no backend — este script sincroniza o botão
+  // da lista sem reload. Botões desabilitados durante o request.
+  (function () {
+    function validTarget(tmdbId: number, mediaType: string | null) {
+      return (
+        Number.isInteger(tmdbId) &&
+        tmdbId > 0 &&
+        (mediaType === "movie" || mediaType === "tv")
+      );
+    }
+
+    // ---- Minha Lista
+    var watchButton = document.querySelector("[data-watchlist-toggle]") as HTMLButtonElement | null;
+    var watchLabel: Element | null = null;
+    var watchSvgs: NodeListOf<Element> | Element[] = [];
+    var watchStatus = document.querySelector("[data-watchlist-status]");
+    var watchId = 0;
+    var watchType: string | null = null;
+
+    if (watchButton instanceof HTMLButtonElement) {
+      watchLabel = watchButton.querySelector("[data-watchlist-label]");
+      watchSvgs = watchButton.querySelectorAll("svg");
+      watchId = Number(watchButton.getAttribute("data-tmdb-id"));
+      watchType = watchButton.getAttribute("data-media-type");
+      if (!validTarget(watchId, watchType)) watchButton = null;
+    }
+
+    function paintWatchlist(saved: boolean) {
+      if (!(watchButton instanceof HTMLButtonElement)) return;
+      watchButton.setAttribute("aria-pressed", saved ? "true" : "false");
+      watchButton.classList.toggle("btn-primary", saved);
+      watchButton.classList.toggle("btn-outline", !saved);
+      if (watchSvgs[0]) watchSvgs[0].classList.toggle("hidden", saved);
+      if (watchSvgs[1]) watchSvgs[1].classList.toggle("hidden", !saved);
+      if (watchLabel) watchLabel.textContent = saved ? "Na minha lista" : "Adicionar à lista";
+    }
+
+    if (watchButton instanceof HTMLButtonElement) {
+      watchButton.addEventListener("click", function () {
+        if (!(watchButton instanceof HTMLButtonElement)) return;
+        var saved = watchButton.getAttribute("aria-pressed") === "true";
+        watchButton.setAttribute("disabled", "");
+        watchButton.classList.add("opacity-60");
+
+        fetch("/api/watchlist", {
+          method: saved ? "DELETE" : "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tmdbId: watchId, mediaType: watchType }),
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          })
+          .then(function () {
+            paintWatchlist(!saved);
+            if (watchStatus) watchStatus.textContent = "";
+          })
+          .catch(function () {
+            if (watchStatus) {
+              watchStatus.textContent = "Não foi possível atualizar sua lista. Tente de novo.";
+            }
+          })
+          .finally(function () {
+            if (watchButton instanceof HTMLButtonElement) {
+              watchButton.removeAttribute("disabled");
+              watchButton.classList.remove("opacity-60");
+            }
+          });
+      });
+    }
+
+    // ---- Já assisti
+    var watchedButton = document.querySelector("[data-watched-toggle]") as HTMLButtonElement | null;
+    var watchedLabel: Element | null = null;
+    var watchedSvgs: NodeListOf<Element> | Element[] = [];
+    var watchedStatus = document.querySelector("[data-watched-status]");
+    var watchedId = 0;
+    var watchedType: string | null = null;
+    var watchedTitle = "";
+
+    if (watchedButton instanceof HTMLButtonElement) {
+      watchedLabel = watchedButton.querySelector("[data-watched-label]");
+      watchedSvgs = watchedButton.querySelectorAll("svg");
+      watchedId = Number(watchedButton.getAttribute("data-tmdb-id"));
+      watchedType = watchedButton.getAttribute("data-media-type");
+      watchedTitle = watchedButton.getAttribute("data-title") || "este título";
+      if (!validTarget(watchedId, watchedType)) watchedButton = null;
+    }
+
+    function paintWatched(isWatched: boolean) {
+      if (!(watchedButton instanceof HTMLButtonElement)) return;
+      watchedButton.setAttribute("aria-pressed", isWatched ? "true" : "false");
+      watchedButton.setAttribute(
+        "aria-label",
+        isWatched
+          ? 'Remover "' + watchedTitle + '" dos assistidos'
+          : 'Marcar "' + watchedTitle + '" como assistido',
+      );
+      watchedButton.classList.toggle("cinevee-watched-on", isWatched);
+      watchedButton.classList.toggle("btn-outline", !isWatched);
+      if (watchedSvgs[0]) watchedSvgs[0].classList.toggle("hidden", isWatched);
+      if (watchedSvgs[1]) watchedSvgs[1].classList.toggle("hidden", !isWatched);
+      if (watchedLabel) watchedLabel.textContent = isWatched ? "✓ Assistido" : "Já assisti";
+    }
+
+    // ---- Avaliação (radiogroup 1–5; salva sem reload via /api/ratings).
+    var ratingRoot = document.querySelector("[data-rating-root]");
+    var ratingLocked = ratingRoot ? ratingRoot.querySelector("[data-rating-locked]") : null;
+    var ratingForm = ratingRoot ? ratingRoot.querySelector("[data-rating-form]") : null;
+    var ratingGroup = ratingRoot ? ratingRoot.querySelector("[data-rating-group]") : null;
+    var ratingValue = ratingRoot ? ratingRoot.querySelector("[data-rating-value]") : null;
+    var ratingRemove = ratingRoot ? ratingRoot.querySelector("[data-rating-remove]") : null;
+    var ratingStatus = ratingRoot ? ratingRoot.querySelector("[data-rating-status]") : null;
+    var ratingId = 0;
+    var ratingType: string | null = null;
+    var currentRating = 0;
+
+    if (ratingRoot instanceof HTMLElement) {
+      ratingId = Number(ratingRoot.getAttribute("data-tmdb-id"));
+      ratingType = ratingRoot.getAttribute("data-media-type");
+      if (!validTarget(ratingId, ratingType)) ratingRoot = null;
+    }
+
+    function paintStars(value: number) {
+      if (!(ratingGroup instanceof HTMLElement)) return;
+      var stars = ratingGroup.querySelectorAll("[data-star]");
+      for (var i = 0; i < stars.length; i++) {
+        var star = stars[i];
+        var n = Number(star.getAttribute("data-star"));
+        var on = value > 0 && n <= value;
+        star.classList.toggle("fill-amber-400", on);
+        star.classList.toggle("text-amber-400", on);
+        star.classList.toggle("fill-transparent", !on);
+        star.classList.toggle("text-base-content/30", !on);
+      }
+      if (ratingValue) ratingValue.textContent = value > 0 ? value + " de 5" : "";
+      if (ratingRemove instanceof HTMLButtonElement) {
+        ratingRemove.classList.toggle("hidden", !(value > 0));
+      }
+    }
+
+    function setRatingUi(value: number) {
+      currentRating = value;
+      paintStars(value);
+      paintReviewVisibility(value);
+      // Sincroniza os radios (teclado/leitores veem o estado persistido).
+      if (ratingGroup instanceof HTMLElement) {
+        var inputs = ratingGroup.querySelectorAll('input[type="radio"]');
+        for (var i = 0; i < inputs.length; i++) {
+          var input = inputs[i];
+          if (input instanceof HTMLInputElement) {
+            input.checked = Number(input.value) === value;
+          }
+        }
+      }
+    }
+
+    function showRatingForm(showForm: boolean) {
+      if (ratingLocked instanceof HTMLElement) ratingLocked.classList.toggle("hidden", showForm);
+      if (ratingForm instanceof HTMLElement) ratingForm.classList.toggle("hidden", !showForm);
+    }
+
+    // ---- Sua opinião (Etapa 12): editor vive dentro do form; visível só
+    // com nota (>0). Trocar estrelas preserva o texto (backend); remover
+    // a avaliação com opinião pede confirmação explícita (#43).
+    var reviewSection = ratingRoot ? ratingRoot.querySelector("[data-review-section]") : null;
+    var reviewGate = ratingRoot ? ratingRoot.querySelector("[data-review-gate]") : null;
+
+    function reviewEditorRoot() {
+      return ratingRoot ? ratingRoot.querySelector("[data-review-editor]") : null;
+    }
+
+    function currentHasReview() {
+      var editor = reviewEditorRoot();
+      return (
+        editor instanceof HTMLElement &&
+        editor.getAttribute("data-has-review") === "true"
+      );
+    }
+
+    function paintReviewVisibility(value: number) {
+      if (reviewSection instanceof HTMLElement) {
+        reviewSection.classList.toggle("hidden", !(value > 0));
+      }
+      if (reviewGate instanceof HTMLElement) {
+        reviewGate.classList.toggle("hidden", value > 0);
+      }
+    }
+
+    function paintRatingRemoveCopy() {
+      if (!(ratingRemove instanceof HTMLButtonElement)) return;
+      var hasReview = currentHasReview();
+      var title = ratingRoot instanceof HTMLElement ? ratingRoot.getAttribute("data-title") || "este título" : "este título";
+      if (hasReview) {
+        ratingRemove.setAttribute(
+          "aria-label",
+          'Remover avaliação e opinião de "' + title + '" (mantém em Assistidos)',
+        );
+        ratingRemove.setAttribute("title", "Remover esta avaliação e sua opinião?");
+      } else {
+        ratingRemove.setAttribute(
+          "aria-label",
+          'Remover avaliação de "' + title + '" (mantém em Assistidos)',
+        );
+        ratingRemove.setAttribute("title", "Remover avaliação");
+      }
+    }
+
+    function resetReviewEditor() {
+      var editor = reviewEditorRoot();
+      if (!(editor instanceof HTMLElement)) return;
+      var textarea = editor.querySelector("[data-review-textarea]");
+      if (textarea instanceof HTMLTextAreaElement) textarea.value = "";
+      editor.setAttribute("data-initial", "");
+      editor.setAttribute("data-has-review", "false");
+      var counter = editor.querySelector("[data-review-counter]");
+      if (counter) counter.textContent = "0 / 2000";
+      var status = editor.querySelector("[data-review-status]");
+      if (status) status.textContent = "";
+      var remove = editor.querySelector("[data-review-remove]");
+      if (remove instanceof HTMLButtonElement) remove.classList.add("hidden");
+      var save = editor.querySelector("[data-review-save]");
+      if (save instanceof HTMLButtonElement) save.textContent = "Salvar opinião";
+      paintRatingRemoveCopy();
+    }
+
+    window.addEventListener("cinevee:review-saved", paintRatingRemoveCopy);
+    window.addEventListener("cinevee:review-removed", paintRatingRemoveCopy);
+
+    if (ratingRoot instanceof HTMLElement && ratingGroup instanceof HTMLElement) {
+      var checked = ratingGroup.querySelector('input[type="radio"]:checked');
+      currentRating = checked instanceof HTMLInputElement ? Number(checked.value) : 0;
+
+      // Preview no hover (desktop); mobile usa o estado persistido.
+      var starLabels = ratingGroup.querySelectorAll("[data-star-label]");
+      for (var l = 0; l < starLabels.length; l++) {
+        (function (label) {
+          label.addEventListener("mouseenter", function () {
+            paintStars(Number(label.getAttribute("data-star-label")));
+          });
+        })(starLabels[l]);
+      }
+      ratingGroup.addEventListener("mouseleave", function () {
+        paintStars(currentRating);
+      });
+
+      ratingGroup.addEventListener("change", function (event) {
+        var target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        var value = Number(target.value);
+        if (value < 1 || value > 5) return;
+        target.setAttribute("disabled", "");
+        fetch("/api/ratings", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tmdbId: ratingId, mediaType: ratingType, rating: value }),
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          })
+          .then(function (data) {
+            var saved = data && data.item && typeof data.item.rating === "number" ? data.item.rating : value;
+            setRatingUi(saved);
+            if (ratingStatus) ratingStatus.textContent = "";
+          })
+          .catch(function () {
+            if (ratingStatus) {
+              ratingStatus.textContent = "Não foi possível salvar sua avaliação. Tente de novo.";
+            }
+            setRatingUi(currentRating);
+          })
+          .finally(function () {
+            if (target instanceof HTMLInputElement) {
+              target.removeAttribute("disabled");
+            }
+          });
+      });
+
+      if (ratingRemove instanceof HTMLButtonElement) {
+        ratingRemove.addEventListener("click", function () {
+          if (!(ratingRemove instanceof HTMLButtonElement)) return;
+          // Com opinião, a remoção destrói o texto: confirmação explícita.
+          if (currentHasReview()) {
+            if (!window.confirm("Remover esta avaliação e sua opinião?")) return;
+          }
+          ratingRemove.setAttribute("disabled", "");
+          fetch("/api/ratings", {
+            method: "DELETE",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tmdbId: ratingId, mediaType: ratingType }),
+          })
+            .then(function (response) {
+              if (!response.ok) throw new Error("HTTP " + response.status);
+              return response.json();
+            })
+            .then(function () {
+              setRatingUi(0);
+              resetReviewEditor();
+              if (ratingStatus) ratingStatus.textContent = "";
+            })
+            .catch(function () {
+              if (ratingStatus) {
+                ratingStatus.textContent = "Não foi possível remover sua avaliação. Tente de novo.";
+              }
+            })
+            .finally(function () {
+              if (ratingRemove instanceof HTMLButtonElement) {
+                ratingRemove.removeAttribute("disabled");
+              }
+            });
+        });
+      }
+    }
+
+    if (watchedButton instanceof HTMLButtonElement) {
+      watchedButton.addEventListener("click", function () {
+        if (!(watchedButton instanceof HTMLButtonElement)) return;
+        var isWatched = watchedButton.getAttribute("aria-pressed") === "true";
+        watchedButton.setAttribute("disabled", "");
+        watchedButton.classList.add("opacity-60");
+
+        fetch("/api/watched", {
+          method: isWatched ? "DELETE" : "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tmdbId: watchedId, mediaType: watchedType }),
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          })
+          .then(function () {
+            paintWatched(!isWatched);
+            // Assistido sai da Minha Lista no backend: sincroniza o botão
+            // da lista sem reload (desmarcar NÃO recria a lista).
+            if (!isWatched) paintWatchlist(false);
+            // Avaliação (cascade): marcar revela as estrelas; desmarcar
+            // apaga nota + opinião no banco — a UI volta ao estado
+            // bloqueado e limpa o editor.
+            if (!isWatched) {
+              showRatingForm(true);
+              setRatingUi(0);
+            } else {
+              showRatingForm(false);
+              setRatingUi(0);
+              resetReviewEditor();
+            }
+            if (watchedStatus) watchedStatus.textContent = "";
+          })
+          .catch(function () {
+            if (watchedStatus) {
+              watchedStatus.textContent = "Não foi possível atualizar assistidos. Tente de novo.";
+            }
+          })
+          .finally(function () {
+            if (watchedButton instanceof HTMLButtonElement) {
+              watchedButton.removeAttribute("disabled");
+              watchedButton.classList.remove("opacity-60");
+            }
+          });
+      });
+    }
+  })();
+</script>

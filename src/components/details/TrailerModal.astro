@@ -1,0 +1,105 @@
+---
+/**
+ * TrailerModal — modal do trailer (YouTube) na página de detalhes.
+ *
+ * Usa `<dialog>` nativo (sem bibliotecas). O iframe NÃO recebe `src` na
+ * carga da página: só quando o usuário abre o modal. Ao fechar (X, Escape
+ * ou clique no backdrop), o `src` é removido, interrompendo o vídeo/áudio.
+ */
+import type { Trailer } from "../../lib/tmdb/videos";
+
+interface Props {
+  trailer: Trailer;
+}
+
+const { trailer } = Astro.props;
+const embedBase = `https://www.youtube-nocookie.com/embed/${trailer.key}`;
+---
+
+<dialog
+  data-trailer-dialog
+  data-embed-base={embedBase}
+  aria-labelledby="trailer-title"
+  class="m-auto max-h-[90vh] w-[calc(100%-2rem)] max-w-[960px] overflow-y-auto rounded-2xl border border-base-300 bg-base-200 p-0 text-base-content shadow-2xl backdrop:bg-black/80"
+>
+  <div class="flex items-center justify-between gap-2 p-4 pb-0">
+    <h2 id="trailer-title" class="truncate text-base font-bold">
+      {trailer.name}
+    </h2>
+    <button
+      type="button"
+      data-trailer-close
+      aria-label="Fechar trailer"
+      class="flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-full hover:bg-base-300"
+    >
+      <svg
+        aria-hidden="true"
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M18 6 6 18" />
+        <path d="m6 6 12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <div class="p-4 pt-3">
+    <div class="aspect-video w-full overflow-hidden rounded-xl bg-black">
+      <iframe
+        data-trailer-frame
+        title={trailer.name}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen
+        class="h-full w-full"
+      />
+    </div>
+  </div>
+
+  <script>
+    const dialog = document.querySelector("[data-trailer-dialog]") as HTMLDialogElement;
+    const openButton = document.querySelector("[data-trailer-open]") as HTMLElement;
+
+    if (dialog instanceof HTMLDialogElement && openButton instanceof HTMLElement) {
+      const closeButton = dialog.querySelector("[data-trailer-close]");
+      const frame = dialog.querySelector("[data-trailer-frame]");
+      const embedBase = dialog.dataset.embedBase ?? "";
+      let opener: Element | null = null;
+
+      function openTrailer(): void {
+        if (!(dialog instanceof HTMLDialogElement)) return;
+        if (!(frame instanceof HTMLIFrameElement) || embedBase.length === 0) return;
+        opener = document.activeElement;
+        // iframe criado/ativado só após ação explícita: autoplay permitido.
+        frame.setAttribute("src", `${embedBase}?autoplay=1&rel=0`);
+        if (!dialog.open) dialog.showModal();
+        if (closeButton instanceof HTMLElement) closeButton.focus();
+      }
+
+      function closeTrailer(): void {
+        if (!(dialog instanceof HTMLDialogElement)) return;
+        if (dialog.open) dialog.close();
+      }
+
+      openButton.addEventListener("click", openTrailer);
+      if (closeButton instanceof HTMLElement) {
+        closeButton.addEventListener("click", closeTrailer);
+      }
+      // Clique no backdrop (fora do conteúdo) fecha.
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) closeTrailer();
+      });
+      // Escape passa por aqui também: limpa o src (para o vídeo/áudio)
+      // e devolve o foco a quem abriu.
+      dialog.addEventListener("close", () => {
+        if (frame instanceof HTMLIFrameElement) frame.removeAttribute("src");
+        if (opener instanceof HTMLElement) opener.focus();
+      });
+    }
+  </script>
+</dialog>

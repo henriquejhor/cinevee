@@ -1,0 +1,54 @@
+---
+/**
+ * SearchResultCard — item da lista vertical de resultados da busca.
+ *
+ * Renderiza um `<template>` clonado pelo JavaScript da página /buscar
+ * para cada resultado. Os valores reais são preenchidos via
+ * textContent/atributos (nunca via innerHTML).
+ */
+---
+
+<template id="search-result-template">
+  <li>
+    <a
+      data-role="link"
+      href="#"
+      class="cinevee-card flex min-h-12 items-center gap-3 rounded-2xl p-2 hover:bg-base-200"
+    >
+      <div
+        data-role="poster"
+        class="cinevee-poster w-16 shrink-0 sm:w-20"
+        style="--ph: 250"
+        aria-hidden="true"
+      >
+        <svg
+          aria-hidden="true"
+          class="absolute inset-0 m-auto h-6 w-6 text-white/25"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+        </svg>
+        <img
+          data-role="img"
+          alt=""
+          width="342"
+          height="513"
+          loading="lazy"
+          class="absolute inset-0 h-full w-full object-cover"
+          hidden
+        />
+      </div>
+      <div class="min-w-0 flex-1 py-1">
+        <p data-role="title" class="line-clamp-2 break-words font-semibold leading-snug">
+        </p>
+        <p data-role="meta" class="mt-1 text-sm text-base-content/60"></p>
+        <p data-role="rating" class="mt-0.5 text-sm text-base-content/60" hidden>
+          <span aria-hidden="true">★ </span><span class="sr-only">Nota </span><span
+            data-role="rating-value"
+          ></span>
+        </p>
+      </div>
+    </a>
+  </li>
+</template>

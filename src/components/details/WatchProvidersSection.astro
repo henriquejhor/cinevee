@@ -1,0 +1,115 @@
+---
+/**
+ * Onde assistir — disponibilidade em streaming no Brasil.
+ *
+ * Server-side only (renderizado com `WatchAvailability`, nunca com a
+ * resposta bruta do TMDB). Mostra só as categorias com resultados,
+ * priorizando Assinatura. Inclui a atribuição obrigatória ao JustWatch.
+ */
+import type { WatchAvailability } from "../../lib/tmdb/availability";
+
+interface Props {
+  /** `null` quando o TMDB não tem dados BR para o título. */
+  availability: WatchAvailability | null;
+  /** `true` quando a consulta ao TMDB falhou (a página continua de pé). */
+  failed?: boolean;
+}
+
+const { availability, failed = false } = Astro.props;
+
+const categories = availability
+  ? [
+      { key: "flatrate", label: "Assinatura", providers: availability.flatrate },
+      { key: "free", label: "Grátis", providers: availability.free },
+      { key: "ads", label: "Grátis com anúncios", providers: availability.ads },
+      { key: "rent", label: "Aluguel", providers: availability.rent },
+      { key: "buy", label: "Compra", providers: availability.buy },
+    ].filter((category) => category.providers.length > 0)
+  : [];
+---
+
+<section aria-labelledby="onde-assistir" class="mt-10">
+  <h2 id="onde-assistir" class="text-xl font-bold tracking-tight">
+    Onde assistir
+  </h2>
+
+  {
+    failed ? (
+      <p class="mt-2 text-sm text-base-content/60">
+        Disponibilidade indisponível no momento.
+      </p>
+    ) : categories.length === 0 ? (
+      <p class="mt-2 text-sm text-base-content/60">
+        Não encontramos informações de disponibilidade no Brasil.
+      </p>
+    ) : (
+      <div>
+        {categories.map((category) => (
+          <div class="mt-4">
+            <h3 class="text-sm font-semibold text-base-content/70">
+              {category.label}
+            </h3>
+            <ul class="mt-2 flex flex-wrap gap-3">
+              {category.providers.map((provider) => (
+                <li
+                  title={provider.name}
+                  class="flex min-h-12 items-center gap-2.5 rounded-2xl border border-base-300 bg-base-200 py-1.5 pl-1.5 pr-4"
+                >
+                  {provider.logoUrl ? (
+                    <img
+                      src={provider.logoUrl}
+                      alt={provider.name}
+                      width="92"
+                      height="92"
+                      loading="lazy"
+                      class="h-9 w-9 rounded-xl object-cover"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      class="flex h-9 w-9 items-center justify-center rounded-xl bg-base-300 text-xs font-bold"
+                    >
+                      {provider.name.slice(0, 1)}
+                    </span>
+                  )}
+                  <span class="max-w-28 truncate text-sm font-medium">
+                    {provider.name}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+
+        {availability?.link && (
+          <a
+            href={availability.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="mt-5 inline-flex min-h-12 items-center gap-2 rounded-full border border-base-300 px-5 text-sm font-medium text-base-content/80 hover:bg-base-200"
+          >
+            Ver opções de reprodução
+            <svg
+              aria-hidden="true"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M7 17 17 7" />
+              <path d="M8 7h9v9" />
+            </svg>
+          </a>
+        )}
+
+        <p class="mt-4 text-xs text-base-content/50">
+          Disponibilidade fornecida por JustWatch.
+        </p>
+      </div>
+    )
+  }
+</section>

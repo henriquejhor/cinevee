@@ -1,0 +1,141 @@
+---
+/**
+ * CarouselRail — wrapper reutilizável dos carrosséis horizontais da Home.
+ *
+ * Preserva o scroll nativo (flex + overflow-x-auto + scroll-snap, sem
+ * bibliotecas). As setas aparecem só em dispositivos com pointer fino
+ * (desktop/tablet) via CSS; no mobile o swipe continua sendo a interação.
+ *
+ * O script abaixo é incluído uma vez por página e conecta TODOS os
+ * [data-carousel] do documento — funciona para N seções sem duplicação.
+ */
+
+interface Props {
+  prevLabel?: string;
+  nextLabel?: string;
+}
+
+const {
+  prevLabel = "Ver itens anteriores",
+  nextLabel = "Ver próximos itens",
+  ...railAttrs
+} = Astro.props;
+---
+
+<div class="cinevee-carousel" data-carousel>
+  <button
+    type="button"
+    data-carousel-prev
+    aria-label={prevLabel}
+    class="cinevee-carousel-btn left-1 border border-base-300 bg-base-200/80 text-base-content backdrop-blur-sm hover:bg-base-200"
+  >
+    <svg
+      aria-hidden="true"
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
+  </button>
+
+  <div class="cinevee-rail" role="list" data-carousel-rail {...railAttrs}>
+    <slot />
+  </div>
+
+  <button
+    type="button"
+    data-carousel-next
+    aria-label={nextLabel}
+    class="cinevee-carousel-btn right-1 border border-base-300 bg-base-200/80 text-base-content backdrop-blur-sm hover:bg-base-200"
+  >
+    <svg
+      aria-hidden="true"
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  </button>
+</div>
+
+<script>
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const TOLERANCE = 2;
+
+  function updateCarousel(carousel: Element): void {
+    const rail = carousel.querySelector("[data-carousel-rail]");
+    const prev = carousel.querySelector("[data-carousel-prev]");
+    const next = carousel.querySelector("[data-carousel-next]");
+    if (
+      !(rail instanceof HTMLElement) ||
+      !(prev instanceof HTMLButtonElement) ||
+      !(next instanceof HTMLButtonElement)
+    ) {
+      return;
+    }
+    const maxScroll = rail.scrollWidth - rail.clientWidth;
+    // Conteúdo filtrado pode encolher além da posição atual: ajusta sem animar.
+    if (rail.scrollLeft > maxScroll) {
+      rail.scrollLeft = Math.max(maxScroll, 0);
+    }
+    prev.disabled = rail.scrollLeft <= TOLERANCE;
+    next.disabled = maxScroll <= TOLERANCE || rail.scrollLeft >= maxScroll - TOLERANCE;
+  }
+
+  function updateAll(): void {
+    document.querySelectorAll("[data-carousel]").forEach(updateCarousel);
+  }
+
+  document.querySelectorAll("[data-carousel]").forEach((carousel) => {
+    const rail = carousel.querySelector("[data-carousel-rail]");
+    const prev = carousel.querySelector("[data-carousel-prev]");
+    const next = carousel.querySelector("[data-carousel-next]");
+    if (
+      !(rail instanceof HTMLElement) ||
+      !(prev instanceof HTMLButtonElement) ||
+      !(next instanceof HTMLButtonElement)
+    ) {
+      return;
+    }
+    const step = (): number => rail.clientWidth * 0.8;
+    const behavior = (): ScrollBehavior => (reduceMotion.matches ? "auto" : "smooth");
+    prev.addEventListener("click", () => {
+      rail.scrollBy({ left: -step(), behavior: behavior() });
+    });
+    next.addEventListener("click", () => {
+      rail.scrollBy({ left: step(), behavior: behavior() });
+    });
+    // Rola só o rail (nunca a página). Estado atualizado via rAF.
+    let ticking = false;
+    rail.addEventListener(
+      "scroll",
+      () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          updateCarousel(carousel);
+          ticking = false;
+        });
+      },
+      { passive: true },
+    );
+    updateCarousel(carousel);
+  });
+
+  window.addEventListener("resize", updateAll);
+  window.addEventListener("load", updateAll);
+  // Seções com filtro (ex.: streamings) avisam quando o conteúdo muda.
+  document.addEventListener("carousel:update", updateAll);
+</script>

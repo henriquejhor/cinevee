@@ -1,0 +1,17 @@
+---
+/**
+ * DiscoveryIcon — ícone line-art do questionário (uso estático).
+ * Para opções dinâmicas, o fluxo usa o mesmo mapa via `optionDisplay()`.
+ */
+import { DISCOVERY_ICONS } from "../../lib/discovery/display";
+
+interface Props {
+  name: string;
+  class?: string;
+}
+
+const { name, class: cls = "" } = Astro.props;
+const svg = DISCOVERY_ICONS[name] ?? "";
+---
+
+<span class:list={["discovery-icon", cls]} aria-hidden="true" set:html={svg} />

@@ -1,0 +1,166 @@
+---
+/**
+ * Filtros do Explore (Etapa 11) — UM formulário, mobile e desktop.
+ *
+ * - GET nativo (sem JS): submit muda a URL, SSR relê os params
+ *   (refresh/back/forward/compartilhar funcionam por construção);
+ * - mesmos controles em todas as telas (stack vertical mobile, grid
+ *   compacto desktop) — sem ExploreFiltersDesktop/Mobile duplicados;
+ * - labels reais (nunca só placeholder); touch >=48px.
+ */
+import { GENRE_OPTIONS } from "../../types/discovery";
+import type { GenreKey } from "../../types/discovery";
+import { PROVIDER_LABELS } from "../../types/content";
+import { getAvailableExploreGenres } from "../../lib/explore/filters";
+import type { ExploreFilters, ExplorePreset } from "../../lib/explore/types";
+
+interface Props {
+  preset: ExplorePreset;
+  filters: ExploreFilters;
+  activeCount: number;
+  maxYear: number;
+}
+
+const { preset, filters, activeCount, maxYear } = Astro.props;
+const basePath = `/explorar/${preset.slug}`;
+// Opções de gênero conforme o tipo atual (ex.: tv omite horror, sem
+// equivalente oficial). Regra serializada p/ o JS resetar ao trocar tipo.
+const availableGenres: GenreKey[] = getAvailableExploreGenres(filters.mediaType);
+const genreLabels = new Map(GENRE_OPTIONS.map((o) => [o.value, o.label]));
+const genreRules: Record<string, string[]> = {
+  movie: GENRE_OPTIONS.map((o) => o.value).filter(
+    (g) => !getAvailableExploreGenres("movie").includes(g),
+  ),
+  tv: GENRE_OPTIONS.map((o) => o.value).filter(
+    (g) => !getAvailableExploreGenres("tv").includes(g),
+  ),
+  all: GENRE_OPTIONS.map((o) => o.value).filter(
+    (g) => !getAvailableExploreGenres("all").includes(g),
+  ),
+};
+---
+
+<form
+  method="get"
+  action={basePath}
+  aria-label="Filtrar títulos"
+  class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end"
+>
+  {
+    !preset.mediaTypeLocked && (
+      <div class="flex min-w-0 flex-col gap-1.5">
+        <label for="explore-tipo" class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+          Tipo
+        </label>
+        <select
+          id="explore-tipo"
+          name="tipo"
+          data-genre-rules={JSON.stringify(genreRules)}
+          class="select select-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+        >
+          <option value="all" selected={filters.mediaType === "all"}>Todos</option>
+          <option value="movie" selected={filters.mediaType === "movie"}>Filmes</option>
+          <option value="tv" selected={filters.mediaType === "tv"}>Séries</option>
+        </select>
+      </div>
+    )
+  }
+
+  <div class="flex min-w-0 flex-col gap-1.5">
+    <label for="explore-genero" class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+      Gênero
+    </label>
+    <select
+      id="explore-genero"
+      name="genero"
+      class="select select-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+    >
+      <option value="all" selected={filters.genre === "all"}>Todos</option>
+      {
+        availableGenres.map((value) => (
+          <option value={value} selected={filters.genre === value}>
+            {genreLabels.get(value)}
+          </option>
+        ))
+      }
+    </select>
+  </div>
+
+  <div class="flex min-w-0 flex-col gap-1.5">
+    <label for="explore-ano" class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+      Ano
+    </label>
+    <input
+      id="explore-ano"
+      name="ano"
+      type="number"
+      inputmode="numeric"
+      min="1900"
+      max={maxYear}
+      placeholder="Todos"
+      value={filters.year ?? ""}
+      class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+    />
+  </div>
+
+  <div class="flex min-w-0 flex-col gap-1.5">
+    <label for="explore-streaming" class="text-xs font-semibold uppercase tracking-wider text-base-content/60">
+      Streaming
+    </label>
+    <select
+      id="explore-streaming"
+      name="streaming"
+      class="select select-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+    >
+      <option value="all" selected={filters.streaming === "all"}>Todos</option>
+      {
+        (Object.entries(PROVIDER_LABELS) as [string, string][]).map(([value, label]) => (
+          <option value={value} selected={filters.streaming === value}>
+            {label}
+          </option>
+        ))
+      }
+    </select>
+  </div>
+
+  <div class="flex gap-2 sm:col-span-2 lg:col-span-1">
+    <button type="submit" class="btn btn-primary min-h-12 flex-1 rounded-full px-6 lg:flex-none">
+      Aplicar{activeCount > 0 ? ` (${activeCount})` : ""}
+    </button>
+    {
+      activeCount > 0 && (
+        <a
+          href={basePath}
+          class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-6"
+        >
+          Limpar
+        </a>
+      )
+    }
+  </div>
+</form>
+
+<script>
+  // Troca de Tipo com gênero incompatível: reseta Gênero para Todos antes
+  // do submit (a URL final fica coerente; sem JS, o servidor responde com
+  // aviso explícito em vez de ignorar o filtro).
+  (function () {
+    var typeSelect = document.getElementById("explore-tipo") as HTMLSelectElement;
+    var genreSelect = document.getElementById("explore-genero") as HTMLSelectElement;
+    if (!(typeSelect instanceof HTMLSelectElement) || !(genreSelect instanceof HTMLSelectElement)) return;
+    var rules: Record<string, string[]> = {};
+    try {
+      rules = JSON.parse(typeSelect.getAttribute("data-genre-rules") ?? "{}");
+    } catch {
+      return;
+    }
+    typeSelect.addEventListener("change", function () {
+      if (!(typeSelect instanceof HTMLSelectElement)) return;
+      if (!(genreSelect instanceof HTMLSelectElement)) return;
+      var unsupported = rules[typeSelect.value];
+      if (Array.isArray(unsupported) && unsupported.includes(genreSelect.value)) {
+        genreSelect.value = "all";
+      }
+    });
+  })();
+</script>

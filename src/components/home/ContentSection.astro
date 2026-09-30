@@ -1,0 +1,71 @@
+---
+import type { ContentItem } from "../../types/content";
+import MoviePosterCard from "../movie/MoviePosterCard.astro";
+import CarouselRail from "./CarouselRail.astro";
+
+interface Props {
+  title: string;
+  items: ContentItem[];
+  icon?: string;
+  /** Nome acessível do link "Ver mais" (ex.: "Ver mais conteúdos em alta"). */
+  moreLabel?: string;
+  /** Destino do "Ver mais" (página expandida da seção). Padrão: /buscar. */
+  moreHref?: string;
+  /** Primeira seção: destaque discretamente maior. */
+  featured?: boolean;
+}
+
+const { title, items, icon, moreLabel, moreHref = "/buscar", featured = false } = Astro.props;
+const sectionId = title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+---
+
+<section aria-labelledby={sectionId} class:list={featured ? "mt-10" : "mt-8"}>
+  <div class="flex min-h-12 items-center justify-between gap-2">
+    <h2
+      id={sectionId}
+      class:list={[
+        "flex items-center gap-2 font-bold tracking-tight",
+        featured ? "text-xl" : "text-lg",
+      ]}
+    >
+      {
+        icon && (
+          <svg
+            aria-hidden="true"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="text-primary"
+          >
+            <Fragment set:html={icon} />
+          </svg>
+        )
+      }
+      {title}
+    </h2>
+    <a
+      href={moreHref}
+      aria-label={moreLabel ?? `Ver mais ${title}`}
+      class="flex min-h-12 min-w-12 items-center justify-center rounded-lg px-3 text-sm font-medium text-primary hover:bg-primary/10"
+    >
+      Ver mais
+    </a>
+  </div>
+  <CarouselRail
+    prevLabel={`Ver itens anteriores de ${title}`}
+    nextLabel={`Ver próximos itens de ${title}`}
+  >
+    {
+      items.map((item) => (
+        <div role="listitem">
+          <MoviePosterCard item={item} />
+        </div>
+      ))
+    }
+  </CarouselRail>
+</section>

@@ -1,0 +1,307 @@
+---
+/**
+ * /u/[username]/seguidores — seguidores com perfil público (Etapa 16).
+ * Sem login obrigatório. Somente via RPC allowlisted; perfil privado ou
+ * inexistente → 404 "Perfil não disponível." SSR página 1 (24) +
+ * Carregar mais com dedupe por username. Sem expor UUID/email/flags.
+ */
+import "../../../styles/global.css";
+import Layout from "../../../layouts/Layout.astro";
+import AppHeader from "../../../components/navigation/AppHeader.astro";
+import TitleNotFound from "../../../components/details/TitleNotFound.astro";
+import PublicPersonCard from "../../../components/public/PublicPersonCard.astro";
+import {
+  getPublicFollowers,
+  getPublicProfile,
+  getPublicSupabase,
+  normalizePublicUsername,
+  type PublicPerson,
+} from "../../../lib/publicProfile/service";
+
+export const prerender = false;
+
+const username = normalizePublicUsername(Astro.params.username);
+const supabase = getPublicSupabase(Astro.request, Astro.cookies);
+const profile = username ? await getPublicProfile(supabase, username) : null;
+
+if (!username || !profile) {
+  Astro.response.status = 404;
+}
+const notFound = !profile;
+
+let items: PublicPerson[] = [];
+let page = 1;
+let hasMore = false;
+
+if (profile && username && !notFound) {
+  try {
+    const result = await getPublicFollowers(supabase, username, 1);
+    items = result.items;
+    page = result.page;
+    hasMore = result.hasMore;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "erro desconhecido";
+    console.error(`[PublicProfile] Falha em /u/${username}/seguidores (${message}).`);
+    Astro.response.status = 500;
+  }
+}
+const loadFailed = Astro.response.status === 500;
+
+const displayName =
+  profile?.displayName?.trim() || (profile ? `@${profile.username}` : "");
+const pageTitle = profile
+  ? `Seguidores de @${profile.username} — CineVee`
+  : "Perfil não disponível — CineVee";
+const pageDescription = profile
+  ? `Quem segue @${profile.username} no CineVee.`
+  : "Este perfil não está disponível no CineVee.";
+---
+
+<Layout title={pageTitle} description={pageDescription} canonicalPath={username ? `/u/${username}/seguidores` : undefined}>
+  <AppHeader />
+  {
+    notFound || loadFailed ? (
+      <main class="mx-auto w-full max-w-3xl px-4 pb-32 pt-16 sm:px-6">
+        <TitleNotFound
+          heading={loadFailed ? "Não foi possível carregar." : "Perfil não disponível."}
+          text={
+            loadFailed
+              ? "Tente novamente em instantes."
+              : "Este perfil não existe ou não está público. Confira o link e tente de novo."
+          }
+        />
+      </main>
+    ) : (
+      profile && (
+        <main class="mx-auto w-full max-w-3xl px-4 pb-32 pt-6 sm:px-6 sm:pt-8">
+          <nav aria-label="Navegação" class="pt-4">
+            <a
+              href={`/u/${profile.username}`}
+              class="inline-flex min-h-12 min-w-12 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-base-content/70 hover:bg-base-200 hover:text-base-content"
+            >
+              <svg
+                aria-hidden="true"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M19 12H5" />
+                <path d="M12 19l-7-7 7-7" />
+              </svg>
+              Voltar ao perfil
+            </a>
+          </nav>
+          <h1 class="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl">
+            Seguidores de {displayName}
+          </h1>
+          <p role="status" data-people-status class="mt-1 text-sm text-base-content/60">
+            {items.length === 0
+              ? "Nenhum seguidor público por aqui ainda."
+              : `Mostrando ${items.length} ${items.length === 1 ? "perfil" : "perfis"}`}
+          </p>
+          <ul
+            id="people-grid"
+            aria-label="Seguidores"
+            class="mx-auto mt-4 flex w-full max-w-3xl flex-col gap-2"
+          >
+            {items.map((person) => <PublicPersonCard person={person} />)}
+          </ul>
+          {
+            hasMore && (
+              <div class="mt-8 flex flex-col items-center gap-3">
+                <button
+                  type="button"
+                  data-people-more
+                  data-username={profile.username}
+                  data-kind="followers"
+                  data-next-page={page + 1}
+                  class="btn btn-outline min-h-12 rounded-full px-10"
+                >
+                  Carregar mais
+                </button>
+                <p role="status" data-people-more-status class="min-h-5 text-xs text-base-content/60" />
+              </div>
+            )
+          }
+        </main>
+      )
+    )
+  }
+</Layout>
+
+<template id="person-card-template">
+  <li data-person-card>
+    <a
+      data-role="link"
+      href="#"
+      class="cinevee-card group flex min-h-12 items-center gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3 hover:border-base-300"
+    >
+      <span
+        data-role="avatar"
+        aria-hidden="true"
+        class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-lg font-extrabold text-white sm:h-20 sm:w-20"
+      >
+        <img
+          data-role="img"
+          alt=""
+          width="160"
+          height="160"
+          loading="lazy"
+          class="h-full w-full object-cover"
+          hidden
+        />
+        <span data-role="initials"></span>
+      </span>
+      <span class="min-w-0 flex-1 py-1">
+        <span data-role="name" class="block truncate font-semibold leading-snug group-hover:text-primary"></span>
+        <span data-role="username" class="block truncate text-sm text-base-content/60"></span>
+        <span data-role="bio" class="mt-0.5 line-clamp-2 block break-words text-sm leading-5 text-base-content/70" hidden></span>
+      </span>
+      <span class="inline-flex min-h-12 shrink-0 items-center rounded-full px-4 text-sm font-semibold text-primary">
+        Ver perfil
+      </span>
+    </a>
+  </li>
+</template>
+
+<script>
+  // Lista pública de pessoas: Carregar mais com dedupe por username
+  // (mesmo padrão das listas públicas). Texto via textContent (nunca
+  // innerHTML). Nenhum UUID no browser.
+  (function () {
+    var moreButton = document.querySelector("[data-people-more]") as HTMLButtonElement;
+    var grid = document.getElementById("people-grid") as HTMLElement;
+    var status = document.querySelector("[data-people-status]");
+    var moreStatus = document.querySelector("[data-people-more-status]");
+    var template = document.getElementById("person-card-template");
+    if (!(moreButton instanceof HTMLButtonElement) || !(grid instanceof HTMLElement)) return;
+
+    var username = moreButton.getAttribute("data-username") ?? "";
+    var kind = moreButton.getAttribute("data-kind") ?? "followers";
+    var nextPage = Number(moreButton.getAttribute("data-next-page") ?? "2");
+    var loading = false;
+
+    function seenKeys() {
+      var keys = new Set();
+      grid.querySelectorAll("[data-person-card]").forEach(function (el) {
+        var key = el.getAttribute("data-key");
+        if (key) keys.add(key);
+      });
+      return keys;
+    }
+
+    function initialsFor(name: string, username: string) {
+      var base = (typeof name === "string" && name.trim()) || username || "";
+      var parts = base.trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0) return "?";
+      var first = parts[0].charAt(0) || "";
+      var last = parts.length > 1 ? parts[parts.length - 1].charAt(0) || "" : "";
+      return (first + last).toUpperCase() || "?";
+    }
+
+    function buildCard(item: { username: string; displayName: string; avatarUrl: string; bio: string }) {
+      if (!(template instanceof HTMLTemplateElement)) return null;
+      if (!item || typeof item !== "object") return null;
+      if (typeof item.username !== "string" || item.username.length === 0) return null;
+      var node = template.content.cloneNode(true);
+      if (!(node instanceof DocumentFragment)) return null;
+      var name =
+        typeof item.displayName === "string" && item.displayName.trim()
+          ? item.displayName.trim()
+          : "@" + item.username;
+      var li = node.querySelector("[data-person-card]");
+      if (li instanceof HTMLElement) {
+        li.setAttribute("data-key", "u:" + item.username);
+      }
+      var link = node.querySelector('[data-role="link"]');
+      if (link instanceof HTMLAnchorElement) {
+        link.href = "/u/" + item.username;
+        link.setAttribute("aria-label", name + ", @" + item.username);
+      }
+      if (typeof item.avatarUrl === "string" && item.avatarUrl.length > 0) {
+        var img = node.querySelector('[data-role="img"]');
+        if (img instanceof HTMLImageElement) {
+          img.src = item.avatarUrl;
+          img.removeAttribute("hidden");
+        }
+        var initials = node.querySelector('[data-role="initials"]');
+        if (initials) initials.setAttribute("hidden", "");
+      } else {
+        var fallback = node.querySelector('[data-role="initials"]');
+        if (fallback) fallback.textContent = initialsFor(item.displayName, item.username);
+      }
+      var nameEl = node.querySelector('[data-role="name"]');
+      if (nameEl) nameEl.textContent = name;
+      var userEl = node.querySelector('[data-role="username"]');
+      if (userEl) userEl.textContent = "@" + item.username;
+      if (typeof item.bio === "string" && item.bio.trim().length > 0) {
+        var bio = node.querySelector('[data-role="bio"]');
+        if (bio instanceof HTMLElement) {
+          bio.textContent = item.bio.trim();
+          bio.removeAttribute("hidden");
+        }
+      }
+      return node;
+    }
+
+    function setLoading(on: boolean) {
+      loading = on;
+      if (on) {
+        moreButton.setAttribute("disabled", "");
+        moreButton.textContent = "Carregando...";
+      } else {
+        moreButton.removeAttribute("disabled");
+        moreButton.textContent = "Carregar mais";
+      }
+    }
+
+    moreButton.addEventListener("click", function () {
+      if (loading || !username) return;
+      setLoading(true);
+      if (moreStatus) moreStatus.textContent = "";
+      var url = "/api/public/profile/" + encodeURIComponent(username) + "/" + kind +
+        "?page=" + encodeURIComponent(String(nextPage));
+      fetch(url, { credentials: "same-origin" })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(function (data) {
+          var items = data && Array.isArray(data.items) ? data.items : [];
+          var known = seenKeys();
+          for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (!item || typeof item !== "object") continue;
+            if (typeof item.username !== "string" || item.username.length === 0) continue;
+            var key = "u:" + item.username;
+            if (known.has(key)) continue;
+            known.add(key);
+            var node = buildCard(item);
+            if (node) grid.appendChild(node);
+          }
+          var total = grid.querySelectorAll("[data-person-card]").length;
+          if (status) {
+            status.textContent = total === 0
+              ? "Nenhum seguidor público por aqui ainda."
+              : "Mostrando " + total + (total === 1 ? " perfil" : " perfis");
+          }
+          if (data && data.hasMore === true) {
+            nextPage += 1;
+            setLoading(false);
+          } else {
+            moreButton.remove();
+            if (moreStatus) moreStatus.textContent = "";
+          }
+        })
+        .catch(function () {
+          setLoading(false);
+          if (moreStatus) moreStatus.textContent = "Não foi possível carregar mais agora. Tente de novo.";
+        });
+    });
+  })();
+</script>

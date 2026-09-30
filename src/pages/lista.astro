@@ -1,0 +1,10 @@
+---
+/**
+ * /lista — compatibilidade: Minha Lista mudou para /perfil/lista
+ * (Etapa 4: Perfil é o hub pessoal). Redirect permanente para que
+ * links antigos não resultem em 404. Implementação única em /perfil/lista.
+ */
+export const prerender = false;
+
+return Astro.redirect("/perfil/lista", 301);
+---

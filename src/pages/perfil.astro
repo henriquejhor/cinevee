@@ -1,0 +1,616 @@
+---
+/**
+ * /perfil — visão do perfil (Etapa 5): hero + tabs + conteúdo.
+ * NÃO é mais um formulário: identidade/stats/tabs vêm do ProfileShell
+ * compartilhado; aqui vivem o preview da Minha Lista e o resumo de
+ * preferências. Edição completa em /perfil/editar.
+ * Exige autenticação: deslogado → /entrar?next=/perfil.
+ */
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+import ProfileShell from "../components/profile/ProfileShell.astro";
+import { getDisplayName } from "../lib/supabase/server";
+import { getUserProfile } from "../lib/profile/service";
+import { getWatchlistCount, getUserWatchlist } from "../lib/watchlist/service";
+import { getRecentWatchedTitles, getWatchedCount } from "../lib/watched/service";
+import { getRecentRatings, getRatingsCount } from "../lib/ratings/service";
+import { getFavorites } from "../lib/profilePicks/service";
+import { getMyFollowCounts } from "../lib/follows/service";
+import { buildPosterUrl } from "../lib/tmdb/image";
+import { GENRE_OPTIONS, PROVIDER_OPTIONS } from "../types/discovery";
+import { buildPersonalization } from "../lib/personalization/tasteProfile";
+import { perf } from "../lib/perf";
+
+export const prerender = false;
+
+const { supabase, user, profile } = await perf(
+  "perfil.profile",
+  () => getUserProfile(Astro.request, Astro.cookies),
+);
+
+if (!user) {
+  return Astro.redirect("/entrar?next=%2Fperfil", 303);
+}
+
+// Profiles é a fonte principal de display_name; fallback metadata/e-mail.
+const displayName = profile?.displayName?.trim()
+  ? (profile.displayName as string)
+  : getDisplayName(user);
+
+// Cargas independentes em paralelo (antes: 7 awaits seriais).
+// Cada uma degrada sozinha para null/[] sem quebrar a página.
+const [watchlistCountRes, previewRes, watchedCountRes, watchedPreviewRes, ratingsCountRes, ratingsPreviewRes, favoritesPreviewRes, followCountsRes, personalizationRes] =
+  await Promise.allSettled([
+    perf("perfil.watchlistCount", () => getWatchlistCount({ supabase, user })),
+    perf("perfil.watchlistPreview", () => getUserWatchlist({ supabase, user })),
+    perf("perfil.watchedCount", () => getWatchedCount({ supabase, user })),
+    perf("perfil.watchedPreview", () => getRecentWatchedTitles({ supabase, user }, 6)),
+    perf("perfil.ratingsCount", () => getRatingsCount({ supabase, user })),
+    perf("perfil.ratingsPreview", () => getRecentRatings({ supabase, user }, 5)),
+    // Favoritos: snapshots ordenados (sem TMDB por pick).
+    perf("perfil.favoritesPreview", () => getFavorites({ supabase, user })),
+    // Follows próprios (totais; pré-migration degrada para zeros).
+    perf("perfil.followCounts", () => getMyFollowCounts({ supabase, user })),
+    // Reutiliza a sessão já validada (sem novo auth.getUser); o taste
+    // vem do cache de versão quando a amostra não mudou (sem TMDB).
+    perf("perfil.taste", () => buildPersonalization(Astro.request, Astro.cookies, { supabase, user })),
+  ]);
+
+function settledValue<T>(res: PromiseSettledResult<T>, fallback: T): T {
+  return res.status === "fulfilled" ? res.value : fallback;
+}
+
+const watchlistCount: number | null = settledValue(watchlistCountRes, null);
+// Preview: últimos ~6 salvos (backend já ordena created_at DESC).
+const preview: Awaited<ReturnType<typeof getUserWatchlist>> = settledValue(
+  previewRes,
+  [],
+).slice(0, 6);
+
+// Assistidos: contador real + recentes.
+const watchedCount: number | null = settledValue(watchedCountRes, null);
+const watchedPreview: Awaited<ReturnType<typeof getRecentWatchedTitles>> =
+  settledValue(watchedPreviewRes, []);
+
+// Avaliações recentes.
+const ratingsCount: number | null = settledValue(ratingsCountRes, null);
+const ratingsPreview: Awaited<ReturnType<typeof getRecentRatings>> =
+  settledValue(ratingsPreviewRes, []);
+
+// Meus favoritos: prévia pequena (até 6, na ordem manual). Só renderiza
+// a seção quando houver favoritos — sem duplicar o Sobre.
+const favoritesPreview: Awaited<ReturnType<typeof getFavorites>> = settledValue(
+  favoritesPreviewRes,
+  [],
+).slice(0, 6);
+
+// Follows próprios (totais). Links públicos só com username + perfil
+// público (as rotas dariam 404 caso contrário).
+const myFollowCounts = settledValue(followCountsRes, {
+  followersTotal: 0,
+  followingTotal: 0,
+  followingPublic: 0,
+});
+const ownUsername = profile?.username ?? null;
+const ownPublic = profile?.privacy?.profilePublic === true;
+const ownFollowHref =
+  ownUsername && ownPublic ? `/u/${ownUsername}` : null;
+
+// "Seu gosto": TasteProfile compacto (sem histórico bruto no browser).
+const tasteProfile = settledValue(personalizationRes, null)?.tasteProfile ?? null;
+
+const prefs = profile?.preferences;
+const genreLabels = new Map(GENRE_OPTIONS.map((o) => [o.value, o.label]));
+const providerLabels = new Map(PROVIDER_OPTIONS.map((o) => [o.value, o.label]));
+
+// "Seu gosto": recortes leves do TasteProfile (rótulos pt-BR, sem scores,
+// versão ou IDs — nada de histórico bruto chega ao browser).
+const tasteRatedCount = tasteProfile?.ratedCount ?? 0;
+const tastePositives = (tasteProfile?.positiveGenres ?? [])
+  .slice(0, 5)
+  .map((s) => genreLabels.get(s.genre) ?? s.genre);
+const tasteNegatives = (tasteProfile?.negativeGenres ?? [])
+  .slice(0, 3)
+  .map((s) => genreLabels.get(s.genre) ?? s.genre);
+const tasteLiked = (tasteProfile?.likedExamples ?? []).slice(0, 3);
+const hasTasteSignals = tastePositives.length > 0 || tasteNegatives.length > 0;
+
+function typeLabel(mediaType: string): string {
+  return mediaType === "tv" ? "Série" : "Filme";
+}
+---
+
+<Layout title="Meu perfil — CineVee" description="Sua conta e preferências no CineVee." noindex>
+  <AppHeader />
+  <main>
+    <ProfileShell
+      displayName={displayName}
+      username={profile?.username ?? null}
+      bio={profile?.bio ?? null}
+      avatarUrl={profile?.avatarUrl ?? null}
+      watchlistCount={watchlistCount}
+      watchedCount={watchedCount}
+      ratingsCount={ratingsCount}
+      activeTab="overview"
+    >
+      {/* Seguidores (management privada) / seguindo (público se houver). */}
+      <p class="mt-8 flex min-h-12 items-center gap-1.5 text-sm">
+        <a
+          href="/perfil/seguidores"
+          class="rounded-lg px-1 py-3 font-semibold text-base-content underline-offset-4 hover:underline"
+        >
+          {myFollowCounts.followersTotal}{" "}
+          {myFollowCounts.followersTotal === 1 ? "seguidor" : "seguidores"}
+        </a>
+        <span aria-hidden="true" class="text-base-content/40">·</span>
+        {
+          ownFollowHref ? (
+            <a
+              href={`${ownFollowHref}/seguindo`}
+              class="rounded-lg px-1 py-3 font-semibold text-base-content underline-offset-4 hover:underline"
+            >
+              {myFollowCounts.followingTotal} seguindo
+            </a>
+          ) : (
+            <span class="px-1 text-base-content/70">
+              {myFollowCounts.followingTotal} seguindo
+            </span>
+          )
+        }
+      </p>
+      {/* Minha Lista — preview */}
+      <section aria-labelledby="overview-list-title" class="mt-10">
+        <div class="flex min-h-12 items-center justify-between gap-4">
+          <h2 id="overview-list-title" class="text-xl font-bold tracking-tight">Minha Lista</h2>
+          <a
+            href="/perfil/lista"
+            class="inline-flex min-h-12 items-center rounded-lg px-3 text-sm font-semibold text-primary underline-offset-4 hover:underline"
+          >
+            Ver todos →
+          </a>
+        </div>
+
+        {
+          preview.length === 0 ? (
+            <div class="mt-4 rounded-3xl border border-base-300 bg-base-200/40 px-6 py-8 text-center">
+              <p class="text-base font-semibold">Você ainda não salvou nenhum título.</p>
+              <a href="/descobrir" class="btn btn-primary mt-4 min-h-12 rounded-full px-8">
+                Descobrir algo
+              </a>
+            </div>
+          ) : (
+            <ul
+              aria-label="Últimos títulos salvos"
+              class="cinevee-no-scrollbar mt-4 flex snap-x gap-4 overflow-x-auto pb-1 lg:grid lg:grid-cols-6 lg:overflow-visible"
+            >
+              {
+                preview.map((item) => {
+                  const posterUrl = buildPosterUrl(item.posterPath);
+                  const label = typeLabel(item.mediaType);
+                  return (
+                    <li class="w-36 shrink-0 snap-start lg:w-auto">
+                      <a
+                        href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                        class="cinevee-card group block rounded-xl"
+                        aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                      >
+                        {
+                          posterUrl ? (
+                            <img
+                              src={posterUrl}
+                              alt={`Pôster de ${item.title}`}
+                              width="500"
+                              height="750"
+                              loading="lazy"
+                              class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                            />
+                          ) : (
+                            <div class="cinevee-poster flex aspect-[2/3] items-center justify-center" aria-hidden="true">
+                              <svg
+                                aria-hidden="true"
+                                class="h-10 w-10 text-white/25"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
+                                <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                              </svg>
+                            </div>
+                          )
+                        }
+                        <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                          {item.title}
+                        </p>
+                        <p class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                          {item.year && <span>{item.year}</span>}
+                          {item.year && <span aria-hidden="true"> · </span>}
+                          <span>{label}</span>
+                        </p>
+                      </a>
+                    </li>
+                  );
+                })
+              }
+            </ul>
+          )
+        }
+      </section>
+
+      {/* Assistidos recentemente — preview */}
+      <section aria-labelledby="overview-watched-title" class="mt-10">
+        <div class="flex min-h-12 items-center justify-between gap-4">
+          <h2 id="overview-watched-title" class="text-xl font-bold tracking-tight">Assistidos recentemente</h2>
+          <a
+            href="/perfil/assistidos"
+            class="inline-flex min-h-12 items-center rounded-lg px-3 text-sm font-semibold text-primary underline-offset-4 hover:underline"
+          >
+            Ver todos →
+          </a>
+        </div>
+
+        {
+          watchedPreview.length === 0 ? (
+            <p class="mt-4 text-sm text-base-content/60">
+              Seus títulos assistidos aparecerão aqui.{" "}
+              <a href="/descobrir" class="font-semibold text-primary underline-offset-4 hover:underline">
+                Descobrir algo
+              </a>
+            </p>
+          ) : (
+            <ul
+              aria-label="Títulos assistidos recentemente"
+              class="cinevee-no-scrollbar mt-4 flex snap-x gap-4 overflow-x-auto pb-1 lg:grid lg:grid-cols-6 lg:overflow-visible"
+            >
+              {
+                watchedPreview.map((item) => {
+                  const posterUrl = buildPosterUrl(item.posterPath);
+                  const label = typeLabel(item.mediaType);
+                  return (
+                    <li class="w-36 shrink-0 snap-start lg:w-auto">
+                      <a
+                        href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                        class="cinevee-card group block rounded-xl"
+                        aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                      >
+                        {
+                          posterUrl ? (
+                            <img
+                              src={posterUrl}
+                              alt={`Pôster de ${item.title}`}
+                              width="500"
+                              height="750"
+                              loading="lazy"
+                              class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                            />
+                          ) : (
+                            <div class="cinevee-poster flex aspect-[2/3] items-center justify-center" aria-hidden="true">
+                              <svg
+                                aria-hidden="true"
+                                class="h-10 w-10 text-white/25"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
+                                <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                              </svg>
+                            </div>
+                          )
+                        }
+                        <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                          {item.title}
+                        </p>
+                        <p class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                          {item.year && <span>{item.year}</span>}
+                          {item.year && <span aria-hidden="true"> · </span>}
+                          <span>{label}</span>
+                        </p>
+                      </a>
+                    </li>
+                  );
+                })
+              }
+            </ul>
+          )
+        }
+      </section>
+
+      {/* Avaliações recentes — preview */}
+      <section aria-labelledby="overview-ratings-title" class="mt-10">
+        <div class="flex min-h-12 items-center justify-between gap-4">
+          <h2 id="overview-ratings-title" class="text-xl font-bold tracking-tight">Avaliações recentes</h2>
+          <a
+            href="/perfil/avaliacoes"
+            class="inline-flex min-h-12 items-center rounded-lg px-3 text-sm font-semibold text-primary underline-offset-4 hover:underline"
+          >
+            Ver todas →
+          </a>
+        </div>
+
+        {
+          ratingsPreview.length === 0 ? (
+            <p class="mt-4 text-sm text-base-content/60">
+              Suas notas aparecerão aqui.{" "}
+              <a href="/perfil/assistidos" class="font-semibold text-primary underline-offset-4 hover:underline">
+                Ver assistidos
+              </a>
+            </p>
+          ) : (
+            <ul
+              aria-label="Avaliações recentes"
+              class="cinevee-no-scrollbar mt-4 flex snap-x gap-4 overflow-x-auto pb-1 lg:grid lg:grid-cols-6 lg:overflow-visible"
+            >
+              {
+                ratingsPreview.map((item) => {
+                  const posterUrl = buildPosterUrl(item.posterPath);
+                  const label = typeLabel(item.mediaType);
+                  return (
+                    <li class="w-36 shrink-0 snap-start lg:w-auto">
+                      <a
+                        href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                        class="cinevee-card group block rounded-xl"
+                        aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}, nota ${item.rating} de 5`}
+                      >
+                        {
+                          posterUrl ? (
+                            <img
+                              src={posterUrl}
+                              alt={`Pôster de ${item.title}`}
+                              width="500"
+                              height="750"
+                              loading="lazy"
+                              class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                            />
+                          ) : (
+                            <div class="cinevee-poster flex aspect-[2/3] items-center justify-center" aria-hidden="true">
+                              <svg
+                                aria-hidden="true"
+                                class="h-10 w-10 text-white/25"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
+                                <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                              </svg>
+                            </div>
+                          )
+                        }
+                        <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                          {item.title}
+                        </p>
+                        <p class="mt-1 flex items-center gap-0.5 px-0.5" aria-hidden="true">
+                          {
+                            [1, 2, 3, 4, 5].map((n) => (
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                class={n <= item.rating ? "fill-amber-400 text-amber-400" : "fill-transparent text-base-content/30"}
+                                fill="currentColor"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linejoin="round"
+                              >
+                                <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                              </svg>
+                            ))
+                          }
+                        </p>
+                        {
+                          typeof item.reviewText === "string" && item.reviewText.trim() !== "" && (
+                            <p class="cinevee-review-text line-clamp-2 mt-1 px-0.5 text-xs leading-5 text-base-content/60">
+                              &ldquo;{item.reviewText}&rdquo;
+                            </p>
+                          )
+                        }
+                      </a>
+                    </li>
+                  );
+                })
+              }
+            </ul>
+          )
+        }
+      </section>
+
+      {/* Meus favoritos — prévia pequena (só quando houver). */}
+      {
+        favoritesPreview.length > 0 && (
+          <section aria-labelledby="overview-favorites-title" class="mt-10">
+            <div class="flex min-h-12 items-center justify-between gap-4">
+              <h2 id="overview-favorites-title" class="text-xl font-bold tracking-tight">Meus favoritos</h2>
+              <a
+                href="/perfil/sobre"
+                class="inline-flex min-h-12 items-center rounded-lg px-3 text-sm font-semibold text-primary underline-offset-4 hover:underline"
+              >
+                Ver Sobre →
+              </a>
+            </div>
+            <ul
+              aria-label="Meus favoritos"
+              class="cinevee-no-scrollbar mt-4 flex snap-x gap-4 overflow-x-auto pb-1 lg:grid lg:grid-cols-6 lg:overflow-visible"
+            >
+              {
+                favoritesPreview.map((item) => {
+                  const posterUrl = buildPosterUrl(item.posterPath);
+                  const label = typeLabel(item.mediaType);
+                  return (
+                    <li class="w-36 shrink-0 snap-start lg:w-auto">
+                      <a
+                        href={`/titulo/${item.mediaType}/${item.tmdbId}`}
+                        class="cinevee-card group block rounded-xl"
+                        aria-label={`${item.title}, ${label.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+                      >
+                        {
+                          posterUrl ? (
+                            <img
+                              src={posterUrl}
+                              alt={`Pôster de ${item.title}`}
+                              width="500"
+                              height="750"
+                              loading="lazy"
+                              class="aspect-[2/3] w-full rounded-xl border border-white/10 object-cover"
+                            />
+                          ) : (
+                            <div class="cinevee-poster flex aspect-[2/3] items-center justify-center" aria-hidden="true">
+                              <svg
+                                aria-hidden="true"
+                                class="h-10 w-10 text-white/25"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                              >
+                                <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+                              </svg>
+                            </div>
+                          )
+                        }
+                        <p class="mt-2 truncate px-0.5 text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+                          {item.title}
+                        </p>
+                        <p class="mt-0.5 px-0.5 text-xs text-base-content/60">
+                          {item.year && <span>{item.year}</span>}
+                          {item.year && <span aria-hidden="true"> · </span>}
+                          <span>{label}</span>
+                        </p>
+                      </a>
+                    </li>
+                  );
+                })
+              }
+            </ul>
+          </section>
+        )
+      }
+
+      {/* Seu gosto — padrões aprendidos das avaliações (TasteProfile). */}
+      <section aria-labelledby="overview-taste-title" class="mt-10">
+        <h2 id="overview-taste-title" class="text-xl font-bold tracking-tight">Seu gosto</h2>
+
+        {
+          tasteRatedCount === 0 ? (
+            <>
+              <p class="mt-1 text-sm text-base-content/60">Seu gosto ainda está começando.</p>
+              <p class="mt-2 max-w-prose text-sm leading-6 text-base-content/75">
+                Depois de avaliar alguns títulos, o CineVee começa a identificar padrões no que você gosta.
+              </p>
+              <p class="mt-4">
+                <a href="/perfil/assistidos" class="btn btn-outline min-h-12 rounded-full px-6 text-sm font-semibold">
+                  Avaliar títulos assistidos
+                </a>
+              </p>
+            </>
+          ) : !hasTasteSignals ? (
+            <>
+              <p class="mt-1 text-sm text-base-content/60">Ainda estamos conhecendo seu gosto.</p>
+              <p class="mt-2 max-w-prose text-sm leading-6 text-base-content/75">
+                Quanto mais títulos você avaliar, melhores ficam esses sinais.
+              </p>
+              <p class="mt-3 text-sm text-base-content/60">
+                {tasteRatedCount === 1 ? "1 título avaliado" : `${tasteRatedCount} títulos avaliados`}
+              </p>
+            </>
+          ) : (
+            <>
+              {
+                tastePositives.length > 0 && (
+                  <>
+                    <p class="mt-3 text-sm font-semibold">Você costuma curtir</p>
+                    <ul aria-label="Gêneros que você costuma curtir" class="mt-2 flex flex-wrap gap-2">
+                      {tastePositives.map((label) => (
+                        <li class="rounded-full border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-base-content/90">
+                          {label}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )
+              }
+              {
+                tasteNegatives.length > 0 && (
+                  <>
+                    <p class="mt-4 text-xs font-medium text-base-content/50">Você costuma avaliar menos</p>
+                    <ul aria-label="Gêneros menos presentes entre suas favoritas" class="mt-2 flex flex-wrap gap-2">
+                      {tasteNegatives.map((label) => (
+                        <li class="rounded-full border border-base-300/70 bg-base-200/50 px-3 py-1 text-xs text-base-content/60">
+                          {label}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )
+              }
+              <p class="mt-3 text-xs text-base-content/50">
+                Baseado em {tasteRatedCount === 1 ? "1 avaliação" : `${tasteRatedCount} avaliações`}
+              </p>
+              {
+                tasteLiked.length > 0 && (
+                  <p class="mt-2 max-w-prose text-xs leading-5 text-base-content/50">
+                    Entre os títulos que ajudaram a formar esse perfil:{" "}
+                    {tasteLiked.map((t) => t.title).join(" · ")}
+                  </p>
+                )
+              }
+              <p class="mt-3 max-w-prose text-xs leading-5 text-base-content/50">
+                O CineVee usa esses sinais como apoio nas recomendações. O que você escolhe no Descobrir continua tendo prioridade.
+              </p>
+            </>
+          )
+        }
+      </section>
+
+      {/* Preferências — resumo (edição em /perfil/editar#preferencias). */}
+      <section aria-labelledby="overview-prefs-title" class="mt-10">
+        <div class="flex min-h-12 items-center justify-between gap-4">
+          <h2 id="overview-prefs-title" class="text-xl font-bold tracking-tight">Preferências</h2>
+          <a
+            href="/perfil/editar#preferencias"
+            class="inline-flex min-h-12 items-center rounded-lg px-3 text-sm font-semibold text-primary underline-offset-4 hover:underline"
+          >
+            Editar preferências
+          </a>
+        </div>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="rounded-2xl border border-base-300/60 bg-base-200/40 px-5 py-4">
+            <h3 class="text-sm font-semibold">Gêneros que evito</h3>
+            {
+              prefs && prefs.excludedGenres.length > 0 ? (
+                <ul aria-label="Gêneros evitados" class="mt-3 flex flex-wrap gap-2">
+                  {prefs.excludedGenres.map((key) => (
+                    <li class="rounded-full border border-base-300 bg-base-200 px-3 py-1.5 text-xs font-medium text-base-content/80">
+                      {genreLabels.get(key) ?? key}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p class="mt-2 text-sm text-base-content/60">Nenhum gênero bloqueado.</p>
+              )
+            }
+          </div>
+          <div class="rounded-2xl border border-base-300/60 bg-base-200/40 px-5 py-4">
+            <h3 class="text-sm font-semibold">Meus streamings</h3>
+            {
+              prefs && prefs.streamingProviders.length > 0 ? (
+                <ul aria-label="Meus streamings" class="mt-3 flex flex-wrap gap-2">
+                  {prefs.streamingProviders.map((key) => (
+                    <li class="rounded-full border border-base-300 bg-base-200 px-3 py-1.5 text-xs font-medium text-base-content/80">
+                      {providerLabels.get(key) ?? key}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p class="mt-2 text-sm text-base-content/60">Nenhum streaming definido.</p>
+              )
+            }
+          </div>
+        </div>
+      </section>
+    </ProfileShell>
+  </main>
+</Layout>
+
+<style>
+  .cinevee-no-scrollbar {
+    scrollbar-width: none;
+  }
+  .cinevee-no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+</style>

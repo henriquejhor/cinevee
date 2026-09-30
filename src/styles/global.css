@@ -1,0 +1,537 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: dark --default;
+}
+
+/* ---------- CineVee: Cinematic Aurora (acabamentos centralizados) ---------- */
+
+:root {
+  --cinevee-aurora-a: oklch(0.65 0.18 290 / 0.22);
+  --cinevee-aurora-b: oklch(0.65 0.15 220 / 0.16);
+  --cinevee-dock-offset: calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+  /* Contém o vazamento lateral da aurora do hero (em vw) sem criar
+     scroll container: `clip` preserva sticky/fixed. Nada é cortado
+     dentro de containers de conteúdo. */
+  overflow-x: clip;
+}
+
+/* Hero: aurora atmosférica ampla e orgânica (mancha elíptica difusa).
+   Sem caixa: a máscara apaga as bordas da camada (principalmente a
+   inferior, antes de "Em alta") e o vazamento horizontal é contido
+   pelo overflow, sem alargar a página. */
+.cinevee-aurora {
+  position: relative;
+  isolation: isolate;
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
+.cinevee-aurora::before {
+  content: "";
+  position: absolute;
+  inset: -12% -30% auto -30%;
+  height: 560px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 42% 38% at 30% 36%, var(--cinevee-aurora-a), transparent 72%),
+    radial-gradient(ellipse 38% 34% at 72% 44%, var(--cinevee-aurora-b), transparent 72%),
+    radial-gradient(ellipse 75% 44% at 50% 30%, var(--cinevee-aurora-b), transparent 80%);
+  background-repeat: no-repeat;
+  filter: blur(28px);
+  -webkit-mask-image: linear-gradient(to bottom, #000 52%, transparent 96%);
+  mask-image: linear-gradient(to bottom, #000 52%, transparent 96%);
+}
+
+/* Desktop: a forma respira mais na horizontal (mesma intensidade). */
+@media (min-width: 1024px) {
+  .cinevee-aurora::before {
+    inset-inline: -18%;
+    height: 600px;
+  }
+}
+
+/* Carrossel horizontal: scroll nativo + snap.
+   Margens negativas espelham o padding do container em cada breakpoint. */
+.cinevee-rail {
+  display: flex;
+  gap: 0.875rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 1rem;
+  padding-inline: 1rem;
+  padding-block: 0.25rem 0.5rem;
+  margin-inline: -1rem;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cinevee-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.cinevee-rail > * {
+  scroll-snap-align: start;
+}
+
+@media (min-width: 640px) {
+  .cinevee-rail {
+    margin-inline: -1.5rem;
+    padding-inline: 1.5rem;
+    scroll-padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .cinevee-rail {
+    margin-inline: -2rem;
+    padding-inline: 2rem;
+    scroll-padding-inline: 2rem;
+  }
+}
+
+/* Carrossel com setas: o wrapper posiciona os botões sobre as laterais
+   do rail. Mobile-first: botões ocultos (swipe é a interação); aparecem
+   só em dispositivos com pointer fino. */
+.cinevee-carousel {
+  position: relative;
+}
+
+.cinevee-carousel-btn {
+  display: none;
+  position: absolute;
+  /* Centro aproximado do pôster (o rail inclui o texto abaixo do pôster). */
+  top: 42%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  transition: opacity 200ms ease, background-color 200ms ease;
+}
+
+.cinevee-carousel-btn[disabled] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cinevee-carousel-btn {
+    display: inline-flex;
+  }
+}
+
+/* Chips de streaming: mesma lógica de respiro lateral do rail */
+.cinevee-chips {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  margin-inline: -1rem;
+  padding-inline: 1rem;
+  padding-block: 0.25rem;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.cinevee-chips::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .cinevee-chips {
+    margin-inline: -1.5rem;
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .cinevee-chips {
+    margin-inline: -2rem;
+    padding-inline: 2rem;
+  }
+}
+
+/* Poster placeholder TEMPORÁRIO (será trocado por imagens TMDB).
+   Propositalmente dessaturado e neutro. */
+.cinevee-poster {
+  aspect-ratio: 2 / 3;
+  border-radius: 0.75rem;
+  border: 1px solid oklch(1 0 0 / 0.08);
+  background:
+    linear-gradient(160deg, oklch(1 0 0 / 0.08), transparent 55%),
+    linear-gradient(200deg, hsl(var(--ph, 250) 22% 26%), hsl(calc(var(--ph, 250) + 40) 24% 15%));
+  position: relative;
+  overflow: hidden;
+}
+
+.cinevee-poster::after {
+  /* vinheta sutil de cinema */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, oklch(0 0 0 / 0.35), transparent 45%);
+}
+
+/* Detalhes: vinheta + aurora sutil sobre o backdrop.
+   Camadas estáticas (sem animação): dão profundidade sem poluir
+   nem competir com o pôster. */
+.cinevee-vignette {
+  background: radial-gradient(120% 90% at 50% 20%, transparent 55%, rgb(0 0 0 / 0.5) 100%);
+}
+
+.cinevee-backdrop-aurora {
+  background: radial-gradient(
+    60% 50% at 20% 0%,
+    oklch(0.65 0.18 290 / 0.14),
+    transparent 70%
+  );
+}
+/* Microinteração do card: elevação leve no hover, pressão no touch */
+.cinevee-card {
+  transition: transform 200ms ease;
+}
+
+/* Estado Assistido: verde cinematográfico discreto, fonte única
+   (Details + recomendações). Reforço visual — o estado continua em
+   ícone + texto + aria-pressed, nunca só cor. Sem neon, sem glow. */
+.cinevee-watched-on {
+  border-color: rgb(16 122 87 / 0.55);
+  background-color: rgb(6 40 30 / 0.55);
+  color: #d9f1e4;
+}
+.cinevee-watched-on:hover {
+  background-color: rgb(6 56 41 / 0.68);
+  border-color: rgb(16 122 87 / 0.75);
+}
+
+.cinevee-card:active {
+  transform: scale(0.98);
+}
+
+@media (hover: hover) {
+  .cinevee-card:hover {
+    transform: translateY(-3px);
+  }
+}
+
+/* Microinteração dos itens da FloatingDock (o container <nav> usa Tailwind). */
+.cinevee-dock-item {
+  min-width: 48px;
+  min-height: 48px;
+  transition: background-color 220ms ease, color 220ms ease, transform 220ms ease;
+}
+
+.cinevee-dock-item:active {
+  transform: scale(0.96);
+}
+
+/* Label do item ativo: slot animado via grid (0fr -> 1fr), sem salto brusco.
+   O texto visual é sempre aria-hidden; o link já possui aria-label.
+   min-width: 0 + overflow: hidden no próprio flex item garantem colapso a
+   zero em qualquer navegador (mínimo automático de scroll-container é 0),
+   sem depender do cálculo intrínseco da track 0fr. */
+.cinevee-dock-label {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  min-width: 0;
+  overflow: hidden;
+  transition: grid-template-columns 260ms ease, opacity 200ms ease;
+}
+
+.cinevee-dock-label > span {
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cinevee-dock-item[aria-current="page"] .cinevee-dock-label {
+  grid-template-columns: 1fr;
+  opacity: 1;
+}
+
+/* Opiniões (Etapa 12): texto puro do usuário — quebras preservadas com
+   CSS seguro (sem HTML/Markdown). A UI nunca injeta HTML (textContent +
+   escape do Astro). Leitura em Details, /perfil/avaliacoes e /perfil. */
+.cinevee-review-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Foco visível consistente */
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary, #8b7cf6);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* ---------- Descobrir: identidade visual do questionário ---------- */
+/* Só UI (ícones, layouts por pergunta, seleção). Lógica intacta.
+   Seletores por data-* — nenhum impacto fora de /descobrir. */
+
+/* Ícones line-art próprios (a11y: decorativos, aria-hidden no SVG). */
+.discovery-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+}
+.discovery-icon--sm {
+  width: 16px;
+  height: 16px;
+}
+.discovery-icon-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.discovery-option-icon {
+  display: block;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  color: var(--color-base-content, #fff);
+  opacity: 0.6;
+  transition: color 200ms ease, opacity 200ms ease;
+}
+.discovery-option-icon:empty {
+  display: none;
+}
+[data-option-desc]:empty {
+  display: none;
+}
+
+/* Seleção: ícone assume primary + elevação sutil (além da cor). */
+[data-option][aria-pressed="true"] .discovery-option-icon {
+  color: var(--color-primary, #8b7cf6);
+  opacity: 1;
+}
+[data-option][aria-pressed="true"] {
+  box-shadow: 0 10px 28px -16px rgb(0 0 0 / 0.7);
+}
+
+/* Hover muito discreto, só em pointer fino. */
+@media (hover: hover) and (pointer: fine) {
+  [data-option]:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in oklab, var(--color-base-content, #fff) 32%, transparent);
+  }
+  [data-option]:hover .discovery-option-icon {
+    opacity: 0.9;
+  }
+}
+
+/* Tipo de conteúdo: 3 cards visuais (1 coluna mobile, 3 desktop). */
+[data-discovery-options][data-kind="single-content"] {
+  display: grid;
+  gap: 0.75rem;
+}
+@media (min-width: 640px) {
+  [data-discovery-options][data-kind="single-content"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+[data-kind="single-content"] [data-option] {
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.7rem;
+  padding: 1.4rem 1rem;
+}
+[data-kind="single-content"] [data-option-text] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+[data-kind="single-content"] .discovery-option-icon {
+  width: 30px;
+  height: 30px;
+}
+[data-kind="single-content"] [data-option-check] {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+}
+
+/* Sensação e compromisso: 1 coluna mobile, 2 colunas desktop. */
+@media (min-width: 640px) {
+  [data-discovery-options][data-kind="single-mood"],
+  [data-discovery-options][data-kind="single-commitment"] {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Gêneros: chips editoriais com wrap; "sem preferência" separado e neutro. */
+[data-discovery-options][data-kind="multi-genres"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+[data-kind="multi-genres"] [data-option] {
+  width: auto;
+  min-height: 3rem;
+  gap: 0.55rem;
+  border-radius: 9999px;
+  padding: 0.7rem 1.1rem;
+}
+[data-kind="multi-genres"] .discovery-option-icon {
+  width: 20px;
+  height: 20px;
+}
+[data-kind="multi-genres"] [data-option-check] {
+  width: 18px;
+  height: 18px;
+}
+[data-kind="multi-genres"] [data-option][data-value="none"] {
+  width: 100%;
+  justify-content: center;
+  border-style: dashed;
+  border-radius: 1rem;
+  margin-top: 0.25rem;
+}
+
+/* Adaptativa: grade 2x2 dinâmica (qualquer quantidade de opções). */
+[data-discovery-options][data-kind="single-adaptive"] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+[data-kind="single-adaptive"] [data-option] {
+  position: relative;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 1.1rem 1rem;
+}
+[data-kind="single-adaptive"] .discovery-option-icon {
+  width: 22px;
+  height: 22px;
+}
+[data-kind="single-adaptive"] [data-option-check] {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+}
+
+/* Streamings: grade 2 colunas; "qualquer plataforma" em linha própria. */
+[data-discovery-options][data-kind="multi-providers"] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+[data-kind="multi-providers"] [data-option][data-value="any"] {
+  grid-column: 1 / -1;
+  justify-content: center;
+}
+
+/* Continuar: largura total no mobile, contida e central no desktop. */
+@media (min-width: 640px) {
+  [data-discovery-continue] {
+    display: flex;
+    width: auto;
+    min-width: 16rem;
+    margin-inline: auto;
+    padding-inline: 2.5rem;
+  }
+}
+
+/* Progresso: brilho pequeno no ponto atual. */
+.discovery-progress-fill {
+  position: relative;
+}
+.discovery-progress-fill::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  transform: translate(50%, -50%);
+  border-radius: 9999px;
+  background: var(--color-primary, #8b7cf6);
+  box-shadow: 0 0 10px 1px var(--color-primary, #8b7cf6);
+}
+
+/* Conclusão: pequeno clímax (headline maior + assinatura sparkles). */
+[data-discovery-stage][data-view="done"] [data-discovery-question] {
+  font-size: 2rem;
+  line-height: 1.15;
+}
+@media (min-width: 640px) {
+  [data-discovery-stage][data-view="done"] [data-discovery-question] {
+    font-size: 2.75rem;
+  }
+}
+[data-discovery-stage][data-view="done"] [data-discovery-question]::before {
+  content: "✦ ";
+  color: var(--color-primary, #8b7cf6);
+}
+[data-discovery-options] > dl {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in oklab, var(--color-base-content, #fff) 12%, transparent);
+  border-radius: 1.25rem;
+  background: color-mix(in oklab, var(--color-base-200, #1d1d26) 55%, transparent);
+  padding: 0.35rem 1.1rem;
+}
+/* A conclusão reaproveita o container da pergunta anterior (ex.: grade
+   2 colunas dos streamings): resumo, CTA e aviso ocupam sempre a linha
+   toda — 1 coluna no mobile e no desktop, sem competição horizontal. */
+[data-discovery-options] > dl,
+[data-discovery-options] > .btn,
+[data-discovery-options] > p {
+  grid-column: 1 / -1;
+}
+[data-discovery-options] > dl > div {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.75rem 0;
+}
+[data-discovery-options] > dl > div + div {
+  border-top: 1px solid color-mix(in oklab, var(--color-base-content, #fff) 9%, transparent);
+}
+/* Resumo empilhado: eyebrow em cima, valor com respiro embaixo. */
+[data-discovery-options] > dl dt {
+  font-size: 0.65rem;
+  line-height: 1.25;
+}
+[data-discovery-options] > dl dd {
+  text-align: left;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+[data-discovery-options] > .btn {
+  min-height: 3.5rem;
+  font-size: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  .cinevee-aurora::before {
+    display: none;
+  }
+}

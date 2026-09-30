@@ -1,0 +1,84 @@
+---
+import NotificationsBell from "../notifications/NotificationsBell.astro";
+
+// AppHeader: marca central preservada + ação discreta de conta.
+// Páginas estáticas (prerender) não conhecem a sessão server-side,
+// então o estado (entrar vs. perfil) é resolvido client-side via
+// GET /api/auth/user. Sem JS, o link "Entrar" permanece visível.
+---
+
+<header class="sticky top-0 z-40 border-b border-base-300/60 bg-base-100/85 backdrop-blur-md">
+  <div class="relative mx-auto flex min-h-14 max-w-6xl items-center justify-center px-4 sm:px-6 lg:px-8">
+    <a href="/" class="flex min-h-12 items-center gap-1.5 rounded-lg px-3" aria-label="CineVee — início">
+      <svg
+        aria-hidden="true"
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        class="text-primary"
+      >
+        <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+      </svg>
+      <span class="text-base font-extrabold tracking-[0.22em]">CINEVEE</span>
+    </a>
+
+    <div class="absolute right-4 flex items-center sm:right-6 lg:right-8">
+      <NotificationsBell />
+      <a
+        id="appheader-login"
+        href="/entrar"
+        class="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full px-4 text-sm font-semibold text-base-content/70 hover:bg-base-200 hover:text-base-content"
+      >
+        Entrar
+      </a>
+      <a
+        id="appheader-account"
+        href="/perfil"
+        style="display: none"
+        class="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full px-3 text-base-content/70 hover:bg-base-200 hover:text-base-content"
+        aria-label="Meu perfil"
+      >
+        <svg
+          aria-hidden="true"
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<script>
+  // Resolvedor discreto de estado de conta: sem impacto no SSR/prerender.
+  (function () {
+    var login = document.getElementById("appheader-login") as HTMLElement;
+    var account = document.getElementById("appheader-account") as HTMLElement;
+    if (!login || !account) return;
+
+    fetch("/api/auth/user", { credentials: "same-origin" })
+      .then(function (res) {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then(function (data) {
+        if (!login || !account) return;
+        if (data && data.authenticated === true) {
+          login.style.display = "none";
+          account.style.display = "";
+        }
+      })
+      .catch(function () {
+        // Mantém "Entrar" visível em caso de falha de rede.
+      });
+  })();
+</script>

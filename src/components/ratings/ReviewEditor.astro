@@ -1,0 +1,288 @@
+---
+/**
+ * ReviewEditor — editor reutilizável da opinião textual (Etapa 12).
+ *
+ * Usado em Details ("Sua opinião") e em /perfil/avaliacoes (inline no card).
+ * Astro + HTML + CSS + JS mínimo, sem framework. Texto puro: a UI nunca
+ * injeta HTML (Astro escapa; o JS usa textContent) e o CSS preserva
+ * quebras com `white-space: pre-wrap` só na LEITURA (aqui o textarea
+ * já preserva quebras nativamente).
+ *
+ * Contrato data-* (controlador delegado no script abaixo):
+ * - root: [data-review-editor] (data-tmdb-id, data-media-type,
+ *   data-initial = opinião inicial, data-has-review="true|false")
+ * - [data-review-textarea], [data-review-counter], [data-review-save],
+ *   [data-review-cancel]? (opcional), [data-review-remove]?,
+ *   [data-review-status] (role=status, aria-live).
+ *
+ * Eventos (window.CustomEvent, sem reload):
+ * - "cinevee:review-saved" { tmdbId, mediaType, reviewText }
+ * - "cinevee:review-removed" { tmdbId, mediaType }
+ * - "cinevee:review-cancelled" { tmdbId, mediaType }
+ */
+interface Props {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  /** Opinião inicial (NULL = sem opinião). */
+  value: string | null;
+  /** Prefixo único para id/label (ex.: "details", "card-550-movie"). */
+  editorId: string;
+  /** Mostra o botão Cancelar (inline no card). Details usa `false`. */
+  showCancel?: boolean;
+  /** Começa oculto (o card revela ao clicar em "Editar opinião"). */
+  hidden?: boolean;
+}
+
+const { tmdbId, mediaType, value, editorId, showCancel = false, hidden = false } = Astro.props;
+const initial = typeof value === "string" ? value : "";
+const hasReview = initial.trim() !== "";
+const textareaId = `${editorId}-textarea`;
+const counterId = `${editorId}-counter`;
+---
+
+<div
+  data-review-editor
+  data-tmdb-id={tmdbId}
+  data-media-type={mediaType}
+  data-initial={initial}
+  data-has-review={hasReview ? "true" : "false"}
+  class:list={[{ hidden }]}
+>
+  <label for={textareaId} class="text-sm font-semibold">
+    Sua opinião
+    <span class="ml-1 font-normal text-base-content/50">(opcional)</span>
+  </label>
+  <textarea
+    id={textareaId}
+    data-review-textarea
+    rows="5"
+    maxlength="2000"
+    placeholder="O que você achou deste título?"
+    class="textarea textarea-bordered mt-2 min-h-28 w-full resize-y text-base leading-6"
+  >{initial}</textarea>
+  <div class="mt-1 flex min-h-12 items-center justify-between gap-3">
+    <p id={counterId} data-review-counter class="text-xs tabular-nums text-base-content/50" aria-live="off">
+      {initial.length} / 2000
+    </p>
+    <p data-review-status role="status" aria-live="polite" class="min-h-6 flex-1 text-right text-xs text-base-content/70"></p>
+  </div>
+  <div class="mt-1 flex flex-wrap items-center gap-2">
+    <button
+      type="button"
+      data-review-save
+      class="btn btn-primary min-h-12 rounded-full px-6 text-sm font-semibold"
+    >
+      {hasReview ? "Salvar alterações" : "Salvar opinião"}
+    </button>
+    {
+      showCancel && (
+        <button
+          type="button"
+          data-review-cancel
+          class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-6 text-sm"
+        >
+          Cancelar
+        </button>
+      )
+    }
+    <button
+      type="button"
+      data-review-remove
+      class:list={[
+        "inline-flex min-h-12 items-center rounded-lg px-2 text-sm text-error/80 underline-offset-4 hover:text-error hover:underline",
+        { hidden: !hasReview },
+      ]}
+      aria-label="Remover opinião (mantém as estrelas)"
+    >
+      Remover opinião
+    </button>
+  </div>
+</div>
+
+<script>
+  // Controlador delegado único: contador client-side, save/remove via
+  // PATCH /api/ratings (sem reload, sem user_id no browser). Guarda global
+  // para não duplicar listeners quando o componente aparece N vezes.
+  (function () {
+    var cineveeWindow = window as { __cineveeReviewEditorInit?: boolean };
+    if (cineveeWindow.__cineveeReviewEditorInit) return;
+    cineveeWindow.__cineveeReviewEditorInit = true;
+
+    function validTarget(tmdbId: number, mediaType: string | null) {
+      return (
+        Number.isInteger(tmdbId) &&
+        tmdbId > 0 &&
+        (mediaType === "movie" || mediaType === "tv")
+      );
+    }
+
+    function setStatus(root: HTMLElement, message: string, isError: boolean) {
+      var status = root.querySelector("[data-review-status]");
+      if (!(status instanceof HTMLElement)) return;
+      status.textContent = message;
+      status.classList.toggle("text-error", !!isError);
+    }
+
+    function paintCounter(root: HTMLElement) {
+      var textarea = root.querySelector("[data-review-textarea]");
+      var counter = root.querySelector("[data-review-counter]");
+      if (!(textarea instanceof HTMLTextAreaElement)) return;
+      if (counter) counter.textContent = textarea.value.length + " / 2000";
+    }
+
+    function paintSaveLabel(root: HTMLElement) {
+      var save = root.querySelector("[data-review-save]");
+      var textarea = root.querySelector("[data-review-textarea]");
+      if (!(save instanceof HTMLButtonElement)) return;
+      if (save.dataset.busy === "true") return;
+      var hasText =
+        textarea instanceof HTMLTextAreaElement
+          ? textarea.value.trim() !== ""
+          : root.getAttribute("data-has-review") === "true";
+      save.textContent = hasText ? "Salvar alterações" : "Salvar opinião";
+    }
+
+    function paintRemove(root: HTMLElement, visible: boolean) {
+      var remove = root.querySelector("[data-review-remove]");
+      if (!(remove instanceof HTMLButtonElement)) return;
+      remove.classList.toggle("hidden", !visible);
+    }
+
+    document.addEventListener("input", function (event) {
+      var target = event.target;
+      if (!(target instanceof HTMLTextAreaElement)) return;
+      var root = target.closest("[data-review-editor]");
+      if (!(root instanceof HTMLElement)) return;
+      paintCounter(root);
+      paintSaveLabel(root);
+    });
+
+    document.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof Element)) return;
+      var root = target.closest("[data-review-editor]");
+      if (!(root instanceof HTMLElement)) return;
+
+      var tmdbId = Number(root.getAttribute("data-tmdb-id"));
+      var mediaType = root.getAttribute("data-media-type");
+      if (!validTarget(tmdbId, mediaType)) return;
+
+      var textarea = root.querySelector("[data-review-textarea]");
+      if (!(textarea instanceof HTMLTextAreaElement)) return;
+
+      // Cancelar: restaura o valor inicial e avisa o pai (o card recolhe).
+      var cancel = target.closest("[data-review-cancel]");
+      if (cancel instanceof HTMLButtonElement) {
+        textarea.value = root.getAttribute("data-initial") || "";
+        paintCounter(root);
+        paintSaveLabel(root);
+        setStatus(root, "", false);
+        window.dispatchEvent(
+          new CustomEvent("cinevee:review-cancelled", {
+            detail: { tmdbId: tmdbId, mediaType: mediaType },
+          }),
+        );
+        return;
+      }
+
+      // Remover opinião (PATCH reviewText:null — mantém as estrelas).
+      var remove = target.closest("[data-review-remove]");
+      if (remove instanceof HTMLButtonElement) {
+        remove.setAttribute("disabled", "");
+        setStatus(root, "Removendo…", false);
+        fetch("/api/ratings", {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tmdbId: tmdbId, mediaType: mediaType, reviewText: null }),
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          })
+          .then(function () {
+            if (!(textarea instanceof HTMLTextAreaElement)) return;
+            if (!(root instanceof HTMLElement)) return;
+            textarea.value = "";
+            root.setAttribute("data-initial", "");
+            root.setAttribute("data-has-review", "false");
+            paintCounter(root);
+            paintSaveLabel(root);
+            paintRemove(root, false);
+            setStatus(root, "Opinião removida.", false);
+            window.dispatchEvent(
+              new CustomEvent("cinevee:review-removed", {
+                detail: { tmdbId: tmdbId, mediaType: mediaType },
+              }),
+            );
+          })
+          .catch(function () {
+            if (!(root instanceof HTMLElement)) return;
+            setStatus(root, "Não foi possível salvar sua opinião.", true);
+          })
+          .finally(function () {
+            if (!(remove instanceof HTMLButtonElement)) return;
+            remove.removeAttribute("disabled");
+          });
+        return;
+      }
+
+      // Salvar opinião (PATCH — não exige clicar nas estrelas de novo).
+      var save = target.closest("[data-review-save]");
+      if (!(save instanceof HTMLButtonElement)) return;
+      var raw = textarea.value;
+      if (raw.trim().length > 2000) {
+        setStatus(root, "Sua opinião deve ter no máximo 2000 caracteres.", true);
+        return;
+      }
+      save.dataset.busy = "true";
+      var originalLabel = save.textContent;
+      save.setAttribute("disabled", "");
+      save.textContent = "Salvando…";
+      setStatus(root, "", false);
+      fetch("/api/ratings", {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tmdbId: tmdbId, mediaType: mediaType, reviewText: raw }),
+      })
+        .then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(function (data) {
+          if (!(textarea instanceof HTMLTextAreaElement)) return;
+          if (!(root instanceof HTMLElement)) return;
+          var saved =
+            data && data.item && typeof data.item.reviewText === "string"
+              ? data.item.reviewText
+              : raw.trim() === ""
+                ? ""
+                : raw.trim();
+          textarea.value = saved;
+          root.setAttribute("data-initial", saved);
+          root.setAttribute("data-has-review", saved.trim() !== "" ? "true" : "false");
+          paintCounter(root);
+          paintRemove(root, saved.trim() !== "");
+          setStatus(root, "Opinião salva.", false);
+          window.dispatchEvent(
+            new CustomEvent("cinevee:review-saved", {
+              detail: { tmdbId: tmdbId, mediaType: mediaType, reviewText: saved },
+            }),
+          );
+        })
+        .catch(function () {
+          if (!(root instanceof HTMLElement)) return;
+          setStatus(root, "Não foi possível salvar sua opinião.", true);
+        })
+        .finally(function () {
+          if (!(save instanceof HTMLButtonElement)) return;
+          if (!(root instanceof HTMLElement)) return;
+          delete save.dataset.busy;
+          save.removeAttribute("disabled");
+          paintSaveLabel(root);
+          if (save.textContent === "Salvando…") save.textContent = originalLabel || "Salvar opinião";
+        });
+    });
+  })();
+</script>

@@ -1,0 +1,184 @@
+---
+/**
+ * Página de detalhes — /titulo/movie/[id] e /titulo/tv/[id].
+ *
+ * Rota dinâmica renderizada on-demand (output server): IDs arbitrários
+ * do TMDB não são prerenderizados. Busca server-side via TMDB (token
+ * nunca chega ao navegador).
+ */
+import "../../../styles/global.css";
+import Layout from "../../../layouts/Layout.astro";
+import DetailsHero from "../../../components/details/DetailsHero.astro";
+import TrailerModal from "../../../components/details/TrailerModal.astro";
+import WatchProvidersSection from "../../../components/details/WatchProvidersSection.astro";
+import TitleNotFound from "../../../components/details/TitleNotFound.astro";
+import {
+  getContentDetails,
+  TitleNotFoundError,
+  type ContentDetails,
+} from "../../../lib/tmdb/details";
+import {
+  getWatchProviders,
+  type WatchAvailability,
+} from "../../../lib/tmdb/availability";
+import { getTrailer, type Trailer } from "../../../lib/tmdb/videos";
+
+const { type, id } = Astro.params;
+
+let details: ContentDetails | null = null;
+let transientError = false;
+
+try {
+  details = await getContentDetails(type ?? "", id ?? "");
+} catch (error) {
+  if (error instanceof TitleNotFoundError) {
+    Astro.response.status = 404;
+  } else {
+    Astro.response.status = 500;
+    transientError = true;
+  }
+}
+
+// Watch Providers: consulta independente — se falhar, a página de detalhes
+// continua íntegra e a seção mostra "indisponível no momento".
+let availability: WatchAvailability | null = null;
+let watchFailed = false;
+
+if (details) {
+  try {
+    availability = await getWatchProviders(details.type, details.id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "erro desconhecido";
+    console.error(
+      `[TMDB] Falha nos watch providers ${details.type}/${details.id} (${message}).`,
+    );
+    watchFailed = true;
+  }
+}
+
+// Trailer: consulta independente e segura (getTrailer nunca lança).
+// `null` → botão/modal omitidos, página inalterada.
+let trailer: Trailer | null = null;
+
+if (details) {
+  trailer = await getTrailer(details.type, details.id);
+}
+
+// Minha Lista + Assistidos + Avaliação: estado inicial server-side, sem
+// exigir login para ver a página. Falha aqui nunca quebra os detalhes.
+// Avaliação inclui a opinião textual (Etapa 12) na mesma consulta.
+let watchlist: { saved: boolean; authenticated: boolean; returnTo: string } | undefined;
+let watched: { watched: boolean; authenticated: boolean; returnTo: string } | undefined;
+let rating: { value: number | null; reviewText: string | null; authenticated: boolean; isWatched: boolean } | undefined;
+
+if (details) {
+  try {
+    const { getWatchlistSession, isInWatchlist } = await import(
+      "../../../lib/watchlist/service"
+    );
+    const { isWatched } = await import("../../../lib/watched/service");
+    const { getRatingForTitle } = await import(
+      "../../../lib/ratings/service"
+    );
+    const session = await getWatchlistSession(Astro.request, Astro.cookies);
+    if (session) {
+      const [saved, isWatchedState] = await Promise.all([
+        isInWatchlist(session, {
+          tmdbId: details.id,
+          mediaType: details.type,
+        }).catch(() => null),
+        isWatched(session, {
+          tmdbId: details.id,
+          mediaType: details.type,
+        }).catch(() => null),
+      ]);
+      if (saved !== null) {
+        watchlist = { saved, authenticated: true, returnTo: Astro.url.pathname };
+      }
+      if (isWatchedState !== null) {
+        watched = { watched: isWatchedState, authenticated: true, returnTo: Astro.url.pathname };
+        if (isWatchedState) {
+          try {
+            const current = await getRatingForTitle(session, {
+              tmdbId: details.id,
+              mediaType: details.type,
+            });
+            rating = {
+              value: current?.rating ?? null,
+              reviewText: current?.reviewText ?? null,
+              authenticated: true,
+              isWatched: true,
+            };
+          } catch {
+            rating = undefined; // tabela ainda não migrada → omite avaliação
+          }
+        } else {
+          rating = { value: null, reviewText: null, authenticated: true, isWatched: false };
+        }
+      }
+    } else {
+      watchlist = { saved: false, authenticated: false, returnTo: Astro.url.pathname };
+      watched = { watched: false, authenticated: false, returnTo: Astro.url.pathname };
+    }
+  } catch {
+    watchlist = undefined;
+    watched = undefined;
+    rating = undefined;
+  }
+}
+
+const pageTitle = details ? `${details.title} — CineVee` : "Título não encontrado — CineVee";
+const pageDescription = details?.overview
+  ? details.overview.slice(0, 160)
+  : "Detalhes de filme ou série no CineVee.";
+---
+
+<Layout title={pageTitle} description={pageDescription} canonicalPath={details ? `/titulo/${details.type}/${details.id}` : undefined} image={details?.posterUrl}>
+  <main class="mx-auto w-full max-w-7xl px-4 pb-32 sm:px-6 lg:px-8">
+    <nav aria-label="Navegação" class="pt-4">
+      <a
+        href="/"
+        class="inline-flex min-h-12 min-w-12 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-base-content/70 hover:bg-base-200 hover:text-base-content"
+      >
+        <svg
+          aria-hidden="true"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M19 12H5" />
+          <path d="M12 19l-7-7 7-7" />
+        </svg>
+        Voltar
+      </a>
+    </nav>
+
+    {
+      details ? (
+        <DetailsHero details={details} trailer={trailer} watchlist={watchlist} watched={watched} rating={rating} />
+      ) : transientError ? (
+        <TitleNotFound
+          heading="Não foi possível carregar este título."
+          text="Tente novamente em instantes ou volte para a Home."
+        />
+      ) : (
+        <TitleNotFound />
+      )
+    }
+
+    {
+      details && (
+        <div class="max-w-3xl">
+          <WatchProvidersSection availability={availability} failed={watchFailed} />
+        </div>
+      )
+    }
+
+    {details && trailer && <TrailerModal trailer={trailer} />}
+  </main>
+</Layout>

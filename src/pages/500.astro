@@ -1,0 +1,30 @@
+---
+/**
+ * 500 global — falha inesperada no servidor (SSR).
+ * Mensagem genérica: nunca expõe stack trace, SQL ou internals.
+ * Detalhes reais ficam nos logs server-side (`console.error`).
+ */
+import "../styles/global.css";
+import Layout from "../layouts/Layout.astro";
+import AppHeader from "../components/navigation/AppHeader.astro";
+
+const error = Astro.props.error;
+if (error instanceof Error) {
+  console.error(`[HTTP] 500 em ${Astro.url.pathname} (${error.message}).`);
+}
+---
+<Layout title="Algo deu errado — CineVee" description="Ocorreu um erro inesperado. Tente novamente." noindex>
+  <AppHeader />
+  <main class="mx-auto w-full max-w-xl px-4 pb-32 pt-16 text-center sm:px-6">
+    <p class="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Erro 500</p>
+    <h1 class="mt-3 text-3xl font-extrabold tracking-tight">Algo deu errado</h1>
+    <p class="mt-2 text-sm leading-6 text-base-content/70">
+      Não foi possível carregar esta página agora. Tente de novo em instantes.
+    </p>
+    <p class="mt-6 flex flex-wrap items-center justify-center gap-3">
+      <a href="/" class="btn btn-primary min-h-12 rounded-full px-8 text-sm font-semibold">
+        Voltar ao início
+      </a>
+    </p>
+  </main>
+</Layout>

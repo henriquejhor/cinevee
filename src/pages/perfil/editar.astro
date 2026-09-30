@@ -1,0 +1,756 @@
+---
+/**
+ * /perfil/editar — edição do perfil (Etapa 5). Protegida por login:
+ * deslogado → /entrar?next=%2Fperfil%2Feditar.
+ *
+ * Seções:
+ *   IDENTIDADE — foto (upload/remoção), nome, @username, bio → PUT
+ *     /api/profile/identity + POST/DELETE /api/profile/avatar.
+ *   PREFERÊNCIAS — reutiliza PreferencesEditor (implementação única).
+ *   CONTA — e-mail como informação + sair.
+ */
+import "../../styles/global.css";
+import Layout from "../../layouts/Layout.astro";
+import AppHeader from "../../components/navigation/AppHeader.astro";
+import PreferencesEditor from "../../components/profile/PreferencesEditor.astro";
+import { getDisplayName } from "../../lib/supabase/server";
+import { getUserProfile } from "../../lib/profile/service";
+import { EMPTY_PREFERENCES, EMPTY_PRIVACY } from "../../lib/profile/types";
+
+export const prerender = false;
+
+const { user, profile } = await getUserProfile(Astro.request, Astro.cookies);
+
+if (!user) {
+  return Astro.redirect("/entrar?next=%2Fperfil%2Feditar", 303);
+}
+
+const displayName = profile?.displayName?.trim()
+  ? (profile.displayName as string)
+  : getDisplayName(user);
+const username = profile?.username ?? "";
+const bio = profile?.bio ?? "";
+const avatarUrl = profile?.avatarUrl ?? null;
+const hasAvatar = Boolean(profile?.avatarPath);
+
+const prefs = profile?.preferences ?? EMPTY_PREFERENCES;
+const privacy = profile?.privacy ?? EMPTY_PRIVACY;
+const hasUsername = Boolean(profile?.username);
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.charAt(0) ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.charAt(0) ?? "") : "";
+  return (first + last).toUpperCase() || "?";
+}
+---
+
+<Layout title="Editar perfil — CineVee" description="Edite sua identidade e preferências no CineVee." noindex>
+  <AppHeader />
+  <main class="mx-auto w-full max-w-6xl px-4 pb-32 pt-10 sm:px-6 sm:pt-14">
+    <nav aria-label="Navegação" class="mb-6">
+      <a
+        href="/perfil"
+        class="inline-flex min-h-12 min-w-12 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-base-content/70 hover:bg-base-200 hover:text-base-content"
+      >
+        <svg
+          aria-hidden="true"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M19 12H5" />
+          <path d="M12 19l-7-7 7-7" />
+        </svg>
+        Voltar ao perfil
+      </a>
+    </nav>
+
+    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Sua conta</p>
+    <h1 class="mt-3 text-3xl font-extrabold tracking-tight sm:text-4xl">Editar perfil</h1>
+
+    <div class="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-14">
+      {/* IDENTIDADE */}
+      <section aria-labelledby="identity-title">
+        <h2 id="identity-title" class="text-xl font-bold tracking-tight">Identidade</h2>
+
+        {/* Foto */}
+        <div class="mt-4 flex items-center gap-4">
+          {
+            avatarUrl ? (
+              <img
+                id="avatar-preview"
+                src={avatarUrl}
+                alt={`Foto de ${displayName}`}
+                width="160"
+                height="160"
+                class="h-20 w-20 rounded-full border border-base-300 object-cover"
+              />
+            ) : (
+              <div
+                id="avatar-preview"
+                aria-hidden="true"
+                class="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-2xl font-extrabold text-white"
+              >
+                {initials(displayName)}
+              </div>
+            )
+          }
+          <div class="min-w-0">
+            <label for="avatar-input" class="text-sm font-semibold">Foto</label>
+            <p class="mt-0.5 text-xs text-base-content/60">JPG, PNG ou WebP de até 3 MB.</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <label
+                for="avatar-input"
+                class="btn btn-outline min-h-12 cursor-pointer rounded-full px-5 text-sm font-semibold"
+              >
+                Escolher foto
+              </label>
+              {
+                hasAvatar && (
+                  <button
+                    id="avatar-remove"
+                    type="button"
+                    class="btn btn-ghost min-h-12 rounded-full border border-base-300/70 px-5 text-sm"
+                  >
+                    Remover foto
+                  </button>
+                )
+              }
+            </div>
+            <input
+              id="avatar-input"
+              name="avatar"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              class="sr-only"
+            />
+          </div>
+        </div>
+        <p id="avatar-status" role="status" aria-live="polite" style="display: none" class="mt-3 rounded-2xl border px-4 py-3 text-sm"></p>
+
+        {/* Nome + username + bio */}
+        <form id="identity-form" class="mt-6 flex flex-col gap-4">
+          <div class="flex flex-col gap-2">
+            <label for="identity-name" class="text-sm font-semibold">Nome</label>
+            <input
+              id="identity-name"
+              name="displayName"
+              type="text"
+              required
+              autocomplete="name"
+              maxlength="80"
+              value={displayName}
+              class="input input-bordered min-h-12 w-full rounded-2xl bg-base-200 text-base"
+            />
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <label for="identity-username" class="text-sm font-semibold">Nome de usuário</label>
+            <div class="flex items-center gap-0">
+              <span aria-hidden="true" class="inline-flex min-h-12 items-center rounded-l-2xl border border-r-0 border-base-300 bg-base-200/60 px-3 text-base text-base-content/50">@</span>
+              <input
+                id="identity-username"
+                name="username"
+                type="text"
+                autocomplete="username"
+                minlength="3"
+                maxlength="24"
+                pattern="[a-z0-9_]{3,24}"
+                placeholder="seu_usuario"
+                value={username}
+                class="input input-bordered min-h-12 w-full rounded-l-none rounded-r-2xl bg-base-200 text-base"
+              />
+            </div>
+            <p class="text-xs text-base-content/60">Opcional. 3 a 24 caracteres: letras minúsculas, números e _.</p>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <label for="identity-bio" class="text-sm font-semibold">Bio</label>
+            <textarea
+              id="identity-bio"
+              name="bio"
+              rows="3"
+              maxlength="160"
+              placeholder="Ficção científica, suspense e filmes que ficam na cabeça por dias."
+              class="textarea textarea-bordered w-full rounded-2xl bg-base-200 text-base"
+            >{bio}</textarea>
+            <p class="text-xs text-base-content/60">Opcional. Até 160 caracteres.</p>
+          </div>
+
+          <p id="identity-status" role="status" aria-live="polite" style="display: none" class="rounded-2xl border px-4 py-3 text-sm"></p>
+
+          <button
+            id="identity-submit"
+            type="submit"
+            class="btn btn-primary min-h-12 w-full rounded-full text-base font-semibold sm:w-auto sm:px-10"
+          >
+            Salvar perfil
+          </button>
+        </form>
+      </section>
+
+      {/* PREFERÊNCIAS */}
+      <section aria-labelledby="prefs-title" id="preferencias" class="scroll-mt-24">
+        <h2 id="prefs-title" class="text-xl font-bold tracking-tight">Preferências</h2>
+        <p class="mt-1 text-sm text-base-content/60">
+          Usadas nas suas recomendações do Descobrir.
+        </p>
+        <PreferencesEditor
+          displayName={displayName}
+          excludedGenres={[...prefs.excludedGenres]}
+          streamingProviders={[...prefs.streamingProviders]}
+        />
+      </section>
+    </div>
+
+    {/* PRIVACIDADE DO PERFIL */}
+    <section aria-labelledby="privacy-title" class="mt-12 max-w-xl">
+      <h2 id="privacy-title" class="text-xl font-bold tracking-tight">Privacidade do perfil</h2>
+      <p class="mt-1 text-sm text-base-content/60">
+        Quando seu perfil está público, qualquer pessoa com o link pode visualizar
+        as informações que você escolher abaixo.
+      </p>
+
+      <p id="privacy-status" role="status" aria-live="polite" style="display: none" class="mt-4 rounded-2xl border px-4 py-3 text-sm"></p>
+
+      <div class="mt-4 rounded-2xl border border-base-300 bg-base-200/60 px-5 py-2">
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 py-2">
+          <span class="text-sm font-semibold">Perfil público</span>
+          <input
+            id="privacy-public"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.profilePublic}
+          />
+        </label>
+        <p class="border-t border-base-300/60 py-3 text-xs text-base-content/60">
+          {
+            hasUsername ? (
+              <span data-privacy-public-link style={privacy.profilePublic ? undefined : "display: none"}>
+                Seu perfil público:{" "}
+                <a href={`/u/${profile?.username}`} class="font-semibold text-primary underline-offset-4 hover:underline">
+                  /u/{profile?.username}
+                </a>
+              </span>
+            ) : (
+              <span>
+                Você ainda não tem @username.{" "}
+                <a href="#identity-username" class="font-semibold text-primary underline-offset-4 hover:underline">
+                  Definir @username
+                </a>{" "}
+                para poder publicar.
+              </span>
+            )
+          }
+          {
+            hasUsername && (
+              <span data-privacy-private-hint style={privacy.profilePublic ? "display: none" : undefined}>
+                Seu perfil ainda é privado.
+              </span>
+            )
+          }
+        </p>
+      </div>
+
+      <fieldset class="mt-4 rounded-2xl border border-base-300 bg-base-200/60 px-5 py-2">
+        <legend class="px-2 text-sm font-semibold">O que aparece no seu perfil</legend>
+        <p class="py-2 text-xs text-base-content/60">
+          Essas opções só aparecem quando seu perfil estiver público.
+        </p>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 border-t border-base-300/60 py-2">
+          <span class="text-sm">Favoritos</span>
+          <input
+            id="privacy-favorites"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.showFavorites}
+          />
+        </label>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 border-t border-base-300/60 py-2">
+          <span class="text-sm">Recomendações</span>
+          <input
+            id="privacy-recommendations"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.showRecommendations}
+          />
+        </label>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 border-t border-base-300/60 py-2">
+          <span class="text-sm">Assistidos</span>
+          <input
+            id="privacy-watched"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.showWatched}
+          />
+        </label>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 border-t border-base-300/60 py-2">
+          <span class="text-sm">Avaliações</span>
+          <input
+            id="privacy-ratings"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.showRatings}
+          />
+        </label>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 border-t border-base-300/60 py-2">
+          <span class="text-sm">Opiniões</span>
+          <input
+            id="privacy-reviews"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.showReviews}
+            disabled={!privacy.showRatings}
+          />
+        </label>
+        <p class="border-t border-base-300/60 py-3 text-xs text-base-content/60">
+          Minha Lista: privada sempre.
+        </p>
+      </fieldset>
+
+      <fieldset class="mt-4 rounded-2xl border border-base-300 bg-base-200/60 px-5 py-2">
+        <legend class="px-2 text-sm font-semibold">Busca de pessoas</legend>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 py-2">
+          <span class="text-sm">Permitir que encontrem meu perfil na busca</span>
+          <input
+            id="privacy-discoverable"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.discoverable}
+          />
+        </label>
+        <p class="border-t border-base-300/60 py-3 text-xs text-base-content/60">
+          Seu perfil poderá aparecer quando alguém pesquisar seu nome ou @username.
+          Seu perfil precisa estar público para aparecer na busca.
+        </p>
+      </fieldset>
+
+      <fieldset class="mt-4 rounded-2xl border border-base-300 bg-base-200/60 px-5 py-2">
+        <legend class="px-2 text-sm font-semibold">Feed de quem segue você</legend>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 py-2">
+          <span class="text-sm">Mostrar minhas atividades para quem me segue</span>
+          <input
+            id="privacy-activity"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.showActivity}
+          />
+        </label>
+        <p class="border-t border-base-300/60 py-3 text-xs text-base-content/60">
+          Quando ativado, suas avaliações, favoritos e recomendações públicas podem
+          aparecer no feed de quem segue você. Nada é distribuído com o perfil privado.
+        </p>
+      </fieldset>
+
+      <fieldset class="mt-4 rounded-2xl border border-base-300 bg-base-200/60 px-5 py-2">
+        <legend class="px-2 text-sm font-semibold">Comentários nas avaliações</legend>
+        <label class="flex min-h-12 cursor-pointer items-center justify-between gap-4 py-2">
+          <span class="text-sm">Permitir novos comentários nas minhas avaliações</span>
+          <input
+            id="privacy-comments"
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={privacy.allowRatingComments}
+          />
+        </label>
+        <p class="border-t border-base-300/60 py-3 text-xs text-base-content/60">
+          Quando ativado, outras pessoas poderão comentar nas suas avaliações públicas.
+          Desativar impede só novos comentários — os já publicados continuam visíveis.
+        </p>
+      </fieldset>
+    </section>
+
+    {/* CONTA */}
+    <section aria-labelledby="account-title" class="mt-12 max-w-xl">
+      <h2 id="account-title" class="text-xl font-bold tracking-tight">Conta</h2>
+      <div class="mt-4 rounded-2xl border border-base-300 bg-base-200/60 px-5 py-4">
+        <p class="text-sm font-semibold">Conta conectada.</p>
+        {
+          user.email && (
+            <p class="mt-1 break-all text-sm text-base-content/70">{user.email}</p>
+          )
+        }
+        <p class="mt-3 border-t border-base-300/60 pt-3 text-sm">
+          <a href="/perfil/bloqueados" class="font-semibold text-primary underline-offset-4 hover:underline">
+            Usuários bloqueados
+          </a>
+        </p>
+      </div>
+      <form method="post" action="/api/auth/logout" class="mt-4">
+        <button
+          type="submit"
+          class="btn btn-outline min-h-12 w-full rounded-full text-base sm:w-auto sm:px-10"
+        >
+          Sair
+        </button>
+      </form>
+    </section>
+  </main>
+</Layout>
+
+<script>
+  // Identidade: PUT /api/profile/identity. Avatar: POST/DELETE /api/profile/avatar.
+  // Nenhum user_id sai do browser: o backend deriva da sessão.
+  (function () {
+    var identityForm = document.getElementById("identity-form") as HTMLFormElement;
+    var identitySubmit = document.getElementById("identity-submit") as HTMLElement;
+    var identityStatus = document.getElementById("identity-status") as HTMLElement;
+    var nameInput = document.getElementById("identity-name") as HTMLInputElement;
+    var usernameInput = document.getElementById("identity-username") as HTMLInputElement;
+    var bioInput = document.getElementById("identity-bio") as HTMLTextAreaElement;
+
+    var avatarInput = document.getElementById("avatar-input") as HTMLInputElement;
+    var avatarRemove = document.getElementById("avatar-remove") as HTMLButtonElement;
+    var avatarStatus = document.getElementById("avatar-status") as HTMLElement;
+
+    function showStatus(el: HTMLElement | null, kind: string, message: string) {
+      if (!el) return;
+      el.textContent = message;
+      el.style.display = "";
+      el.className =
+        "rounded-2xl border px-4 py-3 text-sm " +
+        (kind === "ok"
+          ? "border-success/40 bg-success/10"
+          : "border-error/40 bg-error/10");
+    }
+
+    function hideStatus(el: HTMLElement | null) {
+      if (el) el.style.display = "none";
+    }
+
+    if (identityForm instanceof HTMLFormElement && identitySubmit && identityStatus) {
+      identityForm.addEventListener("submit", function (event) {
+        event.preventDefault();
+        if (!(identitySubmit instanceof HTMLElement)) return;
+        if (!(identityStatus instanceof HTMLElement)) return;
+        hideStatus(identityStatus);
+
+        var displayName = nameInput instanceof HTMLInputElement ? nameInput.value.trim() : "";
+        if (!displayName) {
+          showStatus(identityStatus, "error", "Informe seu nome.");
+          return;
+        }
+        var username = usernameInput instanceof HTMLInputElement ? usernameInput.value : "";
+        var bio = bioInput instanceof HTMLTextAreaElement ? bioInput.value : "";
+
+        identitySubmit.setAttribute("disabled", "");
+        var original = identitySubmit.textContent;
+        identitySubmit.textContent = "Salvando...";
+
+        fetch("/api/profile/identity", {
+          method: "PUT",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ displayName: displayName, username: username, bio: bio }),
+        })
+          .then(function (response) {
+            return response.json().then(function (data) {
+              return { ok: response.ok, data: data };
+            });
+          })
+          .then(function (result) {
+            if (result.ok) {
+              showStatus(identityStatus, "ok", "Perfil salvo.");
+              window.setTimeout(function () { window.location.href = "/perfil"; }, 600);
+            } else {
+              var message =
+                result.data && typeof result.data.error === "string"
+                  ? result.data.error
+                  : "Não foi possível salvar seu perfil.";
+              showStatus(identityStatus, "error", message);
+            }
+          })
+          .catch(function () {
+            showStatus(identityStatus, "error", "Não foi possível salvar seu perfil.");
+          })
+          .finally(function () {
+            if (!(identitySubmit instanceof HTMLElement)) return;
+            identitySubmit.removeAttribute("disabled");
+            identitySubmit.textContent = original;
+          });
+      });
+    }
+
+    if (avatarInput instanceof HTMLInputElement) {
+      avatarInput.addEventListener("change", function () {
+        if (!(avatarInput instanceof HTMLInputElement)) return;
+        hideStatus(avatarStatus);
+        var file = avatarInput.files && avatarInput.files[0];
+        if (!file) return;
+
+        var valid = ["image/jpeg", "image/png", "image/webp"].indexOf(file.type) !== -1;
+        if (!valid || file.size <= 0 || file.size > 3 * 1024 * 1024) {
+          showStatus(avatarStatus, "error", "Use uma imagem JPG, PNG ou WebP de até 3 MB.");
+          avatarInput.value = "";
+          return;
+        }
+
+        var form = new FormData();
+        form.append("avatar", file);
+        showStatus(avatarStatus, "ok", "Enviando foto...");
+
+        fetch("/api/profile/avatar", {
+          method: "POST",
+          credentials: "same-origin",
+          body: form,
+        })
+          .then(function (response) {
+            return response.json().then(function (data) {
+              return { ok: response.ok, data: data };
+            });
+          })
+          .then(function (result) {
+            if (result.ok) {
+              window.location.reload();
+            } else {
+              var message =
+                result.data && typeof result.data.error === "string"
+                  ? result.data.error
+                  : "Não foi possível salvar sua foto.";
+              showStatus(avatarStatus, "error", message);
+              avatarInput.value = "";
+            }
+          })
+          .catch(function () {
+            showStatus(avatarStatus, "error", "Não foi possível salvar sua foto.");
+            avatarInput.value = "";
+          });
+      });
+    }
+
+    // Privacidade: toggles salvam via PATCH /api/profile/privacy.
+    // Nenhum user_id sai do browser; campos desconhecidos são ignorados.
+    var privacyStatus = document.getElementById("privacy-status") as HTMLElement;
+    var privacyPublic = document.getElementById("privacy-public") as HTMLInputElement;
+    var privacyFavorites = document.getElementById("privacy-favorites") as HTMLInputElement;
+    var privacyRecommendations = document.getElementById("privacy-recommendations") as HTMLInputElement;
+    var privacyWatched = document.getElementById("privacy-watched") as HTMLInputElement;
+    var privacyRatings = document.getElementById("privacy-ratings") as HTMLInputElement;
+    var privacyReviews = document.getElementById("privacy-reviews") as HTMLInputElement;
+    var privacyDiscoverable = document.getElementById("privacy-discoverable") as HTMLInputElement;
+    var privacyActivity = document.getElementById("privacy-activity") as HTMLInputElement;
+    var privacyComments = document.getElementById("privacy-comments") as HTMLInputElement;
+    var savingPrivacy = false;
+    var privacyRetryQueued = false;
+
+    function collectPrivacy() {
+      return {
+        profilePublic:
+          privacyPublic instanceof HTMLInputElement ? privacyPublic.checked : false,
+        showFavorites:
+          privacyFavorites instanceof HTMLInputElement ? privacyFavorites.checked : false,
+        showRecommendations:
+          privacyRecommendations instanceof HTMLInputElement
+            ? privacyRecommendations.checked
+            : false,
+        showWatched:
+          privacyWatched instanceof HTMLInputElement ? privacyWatched.checked : false,
+        showRatings:
+          privacyRatings instanceof HTMLInputElement ? privacyRatings.checked : false,
+        showReviews:
+          privacyReviews instanceof HTMLInputElement ? privacyReviews.checked : false,
+        discoverable:
+          privacyDiscoverable instanceof HTMLInputElement ? privacyDiscoverable.checked : false,
+        showActivity:
+          privacyActivity instanceof HTMLInputElement ? privacyActivity.checked : false,
+        allowRatingComments:
+          privacyComments instanceof HTMLInputElement ? privacyComments.checked : false,
+      };
+    }
+
+    function syncPrivacyUi(state: Record<string, unknown>) {
+      if (
+        privacyPublic instanceof HTMLInputElement &&
+        typeof state.profilePublic === "boolean"
+      ) {
+        privacyPublic.checked = state.profilePublic;
+      }
+      if (
+        privacyFavorites instanceof HTMLInputElement &&
+        typeof state.showFavorites === "boolean"
+      ) {
+        privacyFavorites.checked = state.showFavorites;
+      }
+      if (
+        privacyRecommendations instanceof HTMLInputElement &&
+        typeof state.showRecommendations === "boolean"
+      ) {
+        privacyRecommendations.checked = state.showRecommendations;
+      }
+      if (
+        privacyWatched instanceof HTMLInputElement &&
+        typeof state.showWatched === "boolean"
+      ) {
+        privacyWatched.checked = state.showWatched;
+      }
+      if (privacyRatings instanceof HTMLInputElement && typeof state.showRatings === "boolean") {
+        privacyRatings.checked = state.showRatings;
+      }
+      if (privacyReviews instanceof HTMLInputElement) {
+        if (typeof state.showReviews === "boolean") privacyReviews.checked = state.showReviews;
+        privacyReviews.disabled = !(privacyRatings instanceof HTMLInputElement && privacyRatings.checked);
+      }
+      if (
+        privacyDiscoverable instanceof HTMLInputElement &&
+        typeof state.discoverable === "boolean"
+      ) {
+        privacyDiscoverable.checked = state.discoverable;
+      }
+      if (
+        privacyActivity instanceof HTMLInputElement &&
+        typeof state.showActivity === "boolean"
+      ) {
+        privacyActivity.checked = state.showActivity;
+      }
+      if (
+        privacyComments instanceof HTMLInputElement &&
+        typeof state.allowRatingComments === "boolean"
+      ) {
+        privacyComments.checked = state.allowRatingComments;
+      }
+      var publicLink = document.querySelector("[data-privacy-public-link]");
+      var privateHint = document.querySelector("[data-privacy-private-hint]");
+      var isPublic =
+        privacyPublic instanceof HTMLInputElement && privacyPublic.checked;
+      if (publicLink instanceof HTMLElement) publicLink.style.display = isPublic ? "" : "none";
+      if (privateHint instanceof HTMLElement) privateHint.style.display = isPublic ? "none" : "";
+    }
+
+    function savePrivacy() {
+      // Mudança durante o voo: enfileira outro save ao fim (nunca
+      // descarta silenciosamente o toggle mais recente).
+      if (savingPrivacy) {
+        privacyRetryQueued = true;
+        return;
+      }
+      // Publicar/descobrir sem @username salvo: reverte e orienta (o
+      // servidor também bloqueia — nunca confia só no browser).
+      var needsUsername =
+        (privacyPublic instanceof HTMLInputElement && privacyPublic.checked) ||
+        (privacyDiscoverable instanceof HTMLInputElement && privacyDiscoverable.checked);
+      if (
+        needsUsername &&
+        usernameInput instanceof HTMLInputElement &&
+        usernameInput.value.trim().length === 0
+      ) {
+        if (privacyPublic instanceof HTMLInputElement && privacyPublic.checked) {
+          privacyPublic.checked = false;
+          showStatus(privacyStatus, "error", "Crie um @username antes de publicar seu perfil.");
+        } else if (privacyDiscoverable instanceof HTMLInputElement) {
+          privacyDiscoverable.checked = false;
+          showStatus(
+            privacyStatus,
+            "error",
+            "Crie um @username antes de permitir que seu perfil apareça na busca.",
+          );
+        }
+        usernameInput.focus();
+        return;
+      }
+      savingPrivacy = true;
+      privacyRetryQueued = false;
+      hideStatus(privacyStatus);
+      showStatus(privacyStatus, "ok", "Salvando…");
+      fetch("/api/profile/privacy", {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(collectPrivacy()),
+      })
+        .then(function (response) {
+          return response.json().then(function (data) {
+            return { ok: response.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (result.ok && result.data && result.data.privacy) {
+            syncPrivacyUi(result.data.privacy);
+            showStatus(privacyStatus, "ok", "Privacidade salva.");
+          } else {
+            var message =
+              result.data && typeof result.data.error === "string"
+                ? result.data.error
+                : "Não foi possível salvar sua privacidade.";
+            showStatus(privacyStatus, "error", message);
+            // Reverte para o estado real do servidor (sem adivinhar).
+            fetch("/api/profile/privacy", { credentials: "same-origin" })
+              .then(function (res) {
+                return res.ok ? res.json() : null;
+              })
+              .then(function (data) {
+                if (data && data.privacy) syncPrivacyUi(data.privacy);
+                else if (privacyPublic instanceof HTMLInputElement) {
+                  privacyPublic.checked = false;
+                }
+              })
+              .catch(function () {
+                if (privacyPublic instanceof HTMLInputElement) {
+                  privacyPublic.checked = false;
+                }
+              });
+          }
+        })
+        .catch(function () {
+          showStatus(privacyStatus, "error", "Não foi possível salvar sua privacidade.");
+        })
+        .finally(function () {
+          savingPrivacy = false;
+          if (privacyRetryQueued) {
+            privacyRetryQueued = false;
+            savePrivacy();
+          }
+        });
+    }
+
+    [
+      privacyPublic,
+      privacyFavorites,
+      privacyRecommendations,
+      privacyWatched,
+      privacyRatings,
+      privacyReviews,
+      privacyDiscoverable,
+      privacyActivity,
+      privacyComments,
+    ].forEach(function (el) {
+      if (el instanceof HTMLInputElement) {
+        el.addEventListener("change", savePrivacy);
+      }
+    });
+    if (privacyRatings instanceof HTMLInputElement && privacyReviews instanceof HTMLInputElement) {
+      privacyRatings.addEventListener("change", function () {
+        if (!(privacyRatings instanceof HTMLInputElement)) return;
+        if (!(privacyReviews instanceof HTMLInputElement)) return;
+        if (!privacyRatings.checked) privacyReviews.checked = false;
+      });
+    }
+
+    if (avatarRemove instanceof HTMLButtonElement) {
+      avatarRemove.addEventListener("click", function () {
+        if (!(avatarRemove instanceof HTMLButtonElement)) return;
+        hideStatus(avatarStatus);
+        avatarRemove.setAttribute("disabled", "");
+        fetch("/api/profile/avatar", { method: "DELETE", credentials: "same-origin" })
+          .then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.json();
+          })
+          .then(function () {
+            window.location.reload();
+          })
+          .catch(function () {
+            if (!(avatarRemove instanceof HTMLButtonElement)) return;
+            avatarRemove.removeAttribute("disabled");
+            showStatus(avatarStatus, "error", "Não foi possível remover sua foto.");
+          });
+      });
+    }
+  })();
+</script>

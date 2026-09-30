@@ -1,0 +1,65 @@
+---
+import FloatingDock from "../components/navigation/FloatingDock.astro";
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** Oculta a FloatingDock (ex.: telas de entrar/cadastrar). */
+  hideDock?: boolean;
+  /**
+   * Marca a página como não-indexável (`<meta name="robots" content="noindex">`).
+   * Usar em páginas privadas (perfil, notificações, gestão de seguidores,
+   * auth) e na busca interna. Páginas públicas (home, título, perfil
+   * público) permanecem indexáveis.
+   */
+  noindex?: boolean;
+  /**
+   * Caminho canônico da página (ex.: `/titulo/movie/123`). O `<link
+   * rel="canonical">` absoluto só é emitido quando `PUBLIC_SITE_URL`
+   * está definido (Etapa 25: obrigatório em produção; sem domínio
+   * configurado, nenhum canonical fictício é inventado).
+   */
+  canonicalPath?: string;
+  /** Imagem absoluta para OpenGraph/Twitter (ex.: pôster TMDB). */
+  image?: string;
+}
+
+const {
+  title = "CineVee — Descubra o que assistir",
+  description = "Encontre filmes e séries que combinam com seu momento.",
+  hideDock = false,
+  noindex = false,
+  canonicalPath,
+  image,
+} = Astro.props;
+
+const siteUrl = (import.meta.env.PUBLIC_SITE_URL as string | undefined)?.trim().replace(/\/+$/, "");
+const canonical = siteUrl && canonicalPath ? `${siteUrl}${canonicalPath}` : null;
+const pageUrl = siteUrl && canonicalPath ? `${siteUrl}${canonicalPath}` : null;
+---
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0b0b10" />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    {canonical && <link rel="canonical" href={canonical} />}
+    <meta property="og:site_name" content="CineVee" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {pageUrl && <meta property="og:url" content={pageUrl} />}
+    {image && <meta property="og:image" content={image} />}
+    <meta name="twitter:card" content={image ? "summary_large_image" : "summary"} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    {image && <meta name="twitter:image" content={image} />}
+    <title>{title}</title>
+  </head>
+  <body class="bg-base-100 text-base-content min-h-screen antialiased">
+    <slot />
+    {!hideDock && <FloatingDock />}
+  </body>
+</html>

@@ -1,0 +1,276 @@
+---
+import type { ContentItem, StreamingProvider } from "../../types/content";
+import { PROVIDER_LABELS } from "../../types/content";
+import MoviePosterCard from "../movie/MoviePosterCard.astro";
+import StreamingPosterTemplate from "./StreamingPosterTemplate.astro";
+import CarouselRail from "./CarouselRail.astro";
+
+interface Props {
+  /** Conteúdo inicial ("Todos"): real via discover ou mocks de fallback. */
+  items: ContentItem[];
+}
+
+const { items } = Astro.props;
+
+const filters: { key: StreamingProvider | "all"; label: string }[] = [
+  { key: "all", label: "Todos" },
+  ...(Object.entries(PROVIDER_LABELS) as [StreamingProvider, string][]).map(([key, label]) => ({
+    key: key as StreamingProvider | "all",
+    label,
+  })),
+];
+---
+
+<section aria-labelledby="novidades-streamings" class="mt-8">
+  <div class="flex min-h-12 items-center justify-between gap-2">
+    <h2 id="novidades-streamings" class="text-lg font-bold tracking-tight">
+      Nos streamings
+    </h2>
+    <a
+      href="/explorar/nos-streamings"
+      aria-label="Ver mais novidades nos streamings"
+      class="flex min-h-12 min-w-12 items-center justify-center rounded-lg px-3 text-sm font-medium text-primary hover:bg-primary/10"
+    >
+      Ver mais
+    </a>
+  </div>
+
+  <div
+    class="cinevee-chips"
+    role="group"
+    aria-label="Filtrar por streaming"
+    data-streaming-filters
+  >
+    {
+      filters.map((f, i) => (
+        <button
+          type="button"
+          data-filter={f.key}
+          data-label={f.label}
+          aria-pressed={i === 0 ? "true" : "false"}
+          class="flex min-h-12 shrink-0 items-center rounded-full border px-4 text-sm font-medium transition-all duration-200 active:scale-[0.98]"
+          class:list={
+            i === 0
+              ? "border-primary bg-primary text-primary-content"
+              : "border-base-300 bg-base-200 text-base-content/70"
+          }
+        >
+          {f.label}
+        </button>
+      ))
+    }
+  </div>
+
+  <p role="status" data-streaming-status class="mt-3 min-h-5 text-xs text-base-content/60"></p>
+
+  <CarouselRail
+    data-streaming-rail
+    prevLabel="Ver novidades anteriores nos streamings"
+    nextLabel="Ver próximas novidades nos streamings"
+  >
+    {
+      items.map((item) => (
+        <div role="listitem">
+          <MoviePosterCard item={item} />
+        </div>
+      ))
+    }
+  </CarouselRail>
+
+  <StreamingPosterTemplate />
+
+  <script>
+    // Filtros reais via /api/streaming (o navegador nunca fala com o TMDB).
+    // - Cache em memória (Map): cada filtro é buscado no máximo 1x por sessão.
+    // - AbortController + guarda de sequência: resposta antiga nunca
+    //   sobrescreve a seleção nova.
+    // - Durante o loading os cards atuais são mantidos (só com opacidade
+    //   reduzida) — a seção nunca fica vazia de repente.
+    interface StreamingItem {
+      id: number;
+      type: "movie" | "tv";
+      title: string;
+      year?: number;
+      rating?: number;
+      posterUrl?: string;
+      hue: number;
+    }
+
+    const group = document.querySelector("[data-streaming-filters]");
+    const rail = document.querySelector("[data-streaming-rail]") as HTMLElement;
+    const status = document.querySelector("[data-streaming-status]") as HTMLElement;
+    const cardTemplate = document.getElementById("streaming-card-template") as HTMLTemplateElement;
+
+    function isValidItem(item: unknown): item is StreamingItem {
+      if (typeof item !== "object" || item === null) return false;
+      const candidate = item as Record<string, unknown>;
+      return (
+        typeof candidate.id === "number" &&
+        (candidate.type === "movie" || candidate.type === "tv") &&
+        typeof candidate.title === "string" &&
+        (candidate.title as string).length > 0
+      );
+    }
+
+    if (
+      group instanceof HTMLElement &&
+      rail instanceof HTMLElement &&
+      status instanceof HTMLElement &&
+      cardTemplate instanceof HTMLTemplateElement
+    ) {
+      const buttons = [...group.querySelectorAll("button[data-filter]")];
+      const active = ["border-primary", "bg-primary", "text-primary-content"];
+      const idle = ["border-base-300", "bg-base-200", "text-base-content/70"];
+      const cache = new Map<string, StreamingItem[]>();
+      let activeKey = "all";
+      let requestSeq = 0;
+      let aborter: AbortController | null = null;
+
+      function setActiveButton(current: HTMLButtonElement): void {
+        for (const b of buttons) {
+          const on = b === current;
+          b.setAttribute("aria-pressed", String(on));
+          b.classList.remove(...(on ? idle : active));
+          b.classList.add(...(on ? active : idle));
+        }
+      }
+
+      function renderMeta(meta: HTMLElement, item: StreamingItem): void {
+        meta.textContent = "";
+        if (typeof item.year === "number") {
+          const year = document.createElement("span");
+          year.textContent = String(item.year);
+          meta.appendChild(year);
+        }
+        if (typeof item.year === "number" && typeof item.rating === "number") {
+          const sep = document.createElement("span");
+          sep.setAttribute("aria-hidden", "true");
+          sep.textContent = " · ";
+          meta.appendChild(sep);
+        }
+        if (typeof item.rating === "number") {
+          const rating = document.createElement("span");
+          const star = document.createElement("span");
+          star.setAttribute("aria-hidden", "true");
+          star.textContent = "★ ";
+          const sr = document.createElement("span");
+          sr.className = "sr-only";
+          sr.textContent = "Nota ";
+          const value = document.createElement("span");
+          value.textContent = item.rating.toFixed(1);
+          rating.append(star, sr, value);
+          meta.appendChild(rating);
+        }
+      }
+
+      function buildCard(item: StreamingItem): Node {
+        const node = cardTemplate.content.cloneNode(true);
+        const fragment = node as DocumentFragment;
+        const typeLabel = item.type === "tv" ? "Série" : "Filme";
+
+        const link = fragment.querySelector('[data-role="link"]');
+        if (link instanceof HTMLAnchorElement) {
+          link.href = `/titulo/${item.type}/${item.id}`;
+          link.setAttribute(
+            "aria-label",
+            `${item.title}, ${typeLabel.toLowerCase()}${typeof item.year === "number" ? ` de ${item.year}` : ""}`,
+          );
+        }
+        const poster = fragment.querySelector('[data-role="poster"]');
+        if (poster instanceof HTMLElement) {
+          poster.style.setProperty("--ph", String(item.hue));
+        }
+        if (typeof item.posterUrl === "string" && item.posterUrl.length > 0) {
+          const img = fragment.querySelector('[data-role="img"]');
+          if (img instanceof HTMLImageElement) {
+            img.src = item.posterUrl;
+            img.alt = `Pôster de ${item.title}`;
+            img.removeAttribute("hidden");
+          }
+        }
+        const badge = fragment.querySelector('[data-role="badge"]');
+        if (badge) badge.textContent = typeLabel;
+        const title = fragment.querySelector('[data-role="title"]');
+        if (title) title.textContent = item.title;
+        const meta = fragment.querySelector('[data-role="meta"]');
+        if (meta instanceof HTMLElement) renderMeta(meta, item);
+
+        return node;
+      }
+
+      function renderItems(items: StreamingItem[], key: string, label: string): void {
+        while (rail.firstChild) rail.removeChild(rail.firstChild);
+        for (const item of items) rail.appendChild(buildCard(item));
+        rail.scrollLeft = 0;
+        status.textContent =
+          items.length === 0
+            ? "Nenhum título recente encontrado neste streaming."
+            : key === "all"
+              ? `Mostrando todos os ${items.length} títulos`
+              : `Mostrando ${items.length} títulos em ${label}`;
+        // Avisa os controles do carrossel para recalcular o estado das setas.
+        rail.dispatchEvent(new CustomEvent("carousel:update", { bubbles: true }));
+      }
+
+      async function selectFilter(
+        btn: HTMLButtonElement,
+        key: string,
+        label: string,
+      ): Promise<void> {
+        setActiveButton(btn);
+        // Mesmo chip já ativo e com dados: nada a fazer. Sem dados
+        // (erro anterior): tenta novamente.
+        if (key === activeKey && cache.has(key)) return;
+        activeKey = key;
+
+        const cached = cache.get(key);
+        if (cached) {
+          renderItems(cached, key, label);
+          return;
+        }
+
+        if (aborter) aborter.abort();
+        aborter = new AbortController();
+        const mySeq = (requestSeq += 1);
+
+        // Feedback discreto mantendo os cards atuais visíveis.
+        rail.style.opacity = "0.45";
+        status.textContent = `Carregando ${label}...`;
+
+        try {
+          const response = await fetch(
+            `/api/streaming?provider=${encodeURIComponent(key)}`,
+            { signal: aborter.signal },
+          );
+          if (mySeq !== requestSeq) return;
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data: unknown = await response.json();
+          if (mySeq !== requestSeq) return;
+          const items =
+            typeof data === "object" && data !== null && Array.isArray((data as { results?: unknown }).results)
+              ? ((data as { results: unknown[] }).results.filter(isValidItem) as StreamingItem[])
+              : [];
+          cache.set(key, items);
+          rail.style.opacity = "";
+          renderItems(items, key, label);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          if (mySeq !== requestSeq) return;
+          rail.style.opacity = "";
+          // Mantém os cards antigos; tocar no chip tenta de novo.
+          status.textContent = "Não foi possível carregar este streaming agora.";
+        }
+      }
+
+      group.addEventListener("click", (event) => {
+        const btn = (event.target as HTMLElement).closest("button[data-filter]");
+        if (!(btn instanceof HTMLButtonElement)) return;
+        void selectFilter(
+          btn,
+          btn.dataset.filter ?? "all",
+          btn.dataset.label ?? "Todos",
+        );
+      });
+    }
+  </script>
+</section>

@@ -1,0 +1,176 @@
+---
+/**
+ * Card de notification (Etapa 21). SSR na primeira página de
+ * /notificacoes; o client replica o markup ao Carregar mais.
+ *
+ * Unread = dot + borda sutil (nunca só cor) + "Não lida" sr-only.
+ * Todo texto de usuário via interpolação escapada (Astro escapa).
+ * ARIA sem payload cru (labels estáticos + nomes em texto visível).
+ */
+import type { NotificationItem } from "../../lib/notifications/types";
+
+interface Props {
+  item: NotificationItem;
+}
+
+const { item } = Astro.props;
+
+function relativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const diff = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (diff < 60) return "agora mesmo";
+  const minutes = Math.floor(diff / 60);
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "há 1 dia";
+  if (days < 7) return `há ${days} dias`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return weeks === 1 ? "há 1 sem" : `há ${weeks} sem`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return months === 1 ? "há 1 mês" : `há ${months} meses`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? "há 1 ano" : `há ${years} anos`;
+}
+
+function initials(name: string | null): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.charAt(0) ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.charAt(0) ?? "") : "";
+  return (first + last).toUpperCase() || "?";
+}
+
+const actorName = item.actor.isPrivate
+  ? "Usuário privado"
+  : (item.actor.displayName?.trim() || (item.actor.username ? `@${item.actor.username}` : "Alguém"));
+const actorHref =
+  !item.actor.isPrivate && item.actor.username ? `/u/${item.actor.username}` : null;
+const titleHref = item.title ? `/titulo/${item.title.mediaType}/${item.title.tmdbId}` : null;
+const timeLabel = relativeTime(item.createdAt);
+
+const actionText =
+  item.type === "follow"
+    ? "começou a seguir você."
+    : item.type === "rating_like"
+      ? `curtiu sua avaliação${item.title?.title ? ` de ${item.title.title}` : "."}`
+      : item.type === "rating_comment"
+        ? `comentou na sua avaliação${item.title?.title ? ` de ${item.title.title}` : "."}`
+        : `respondeu ao seu comentário${item.title?.title ? ` sobre ${item.title.title}` : "."}`;
+
+const previewText =
+  item.type === "rating_comment" ? item.commentText : item.type === "comment_reply" ? item.replyText : null;
+---
+
+<li
+  data-notification-id={item.notificationId}
+  data-unread={item.isRead ? "false" : "true"}
+  class:list={[
+    "flex gap-3 rounded-2xl border p-3",
+    item.isRead ? "border-base-300/60 bg-base-200/40" : "border-primary/40 bg-primary/5",
+  ]}
+>
+  <span
+    data-role="notification-dot"
+    aria-hidden="true"
+    class:list={[
+      "mt-2 h-2 w-2 shrink-0 rounded-full",
+      item.isRead ? "bg-transparent" : "bg-primary",
+    ]}
+  ></span>
+
+  {
+    actorHref ? (
+      <a
+        href={actorHref}
+        aria-label="Ver perfil"
+        class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-sm font-extrabold text-white"
+      >
+        {item.actor.avatarUrl ? (
+          <img src={item.actor.avatarUrl} alt="" width="96" height="96" loading="lazy" aria-hidden="true" class="h-full w-full object-cover" />
+        ) : (
+          <span aria-hidden="true" class="flex h-full w-full items-center justify-center">{initials(actorName)}</span>
+        )}
+      </a>
+    ) : (
+      <span
+        aria-hidden="true"
+        class="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base-300 text-sm font-extrabold text-base-content/60"
+      >
+        {initials(item.actor.isPrivate ? null : actorName)}
+      </span>
+    )
+  }
+
+  <div class="min-w-0 flex-1">
+    <p class="break-words text-sm leading-snug">
+      {item.isRead ? null : <span class="sr-only">Não lida. </span>}
+      {actorHref ? (
+        <a href={actorHref} class="font-semibold hover:text-primary">{actorName}</a>
+      ) : (
+        <span class="font-semibold">{actorName}</span>
+      )}{" "}
+      <span class="text-base-content/80">{actionText}</span>
+    </p>
+
+    {
+      previewText && (
+        <p data-role="notification-preview" class="mt-1 line-clamp-3 break-words text-sm leading-6 text-base-content/70">
+          “{previewText}”
+        </p>
+      )
+    }
+
+    <p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60">
+      <time datetime={item.createdAt}>{timeLabel}</time>
+      {
+        titleHref && (
+          <a href={titleHref} class="font-semibold text-primary underline-offset-4 hover:underline">
+            Ver título
+          </a>
+        )
+      }
+      {
+        item.title && (
+          <a href="/perfil/avaliacoes" class="underline-offset-4 hover:underline">
+            Minhas avaliações
+          </a>
+        )
+      }
+    </p>
+  </div>
+
+  {
+    item.title && (
+      <a
+        href={titleHref ?? "/perfil/avaliacoes"}
+        aria-hidden="true"
+        tabindex="-1"
+        class="relative block w-12 shrink-0 self-start overflow-hidden rounded-lg bg-base-300/60"
+      >
+        <span
+          data-role="poster-fallback"
+          aria-hidden="true"
+          class="flex aspect-[2/3] w-full items-center justify-center text-lg font-extrabold text-base-content/40"
+        >
+          ★
+        </span>
+        {
+          item.title.posterUrl && (
+            <img
+              src={item.title.posterUrl}
+              alt=""
+              width="96"
+              height="144"
+              loading="lazy"
+              data-role="notification-poster"
+              class="absolute inset-0 aspect-[2/3] h-full w-full object-cover"
+            />
+          )
+        }
+      </a>
+    )
+  }
+</li>

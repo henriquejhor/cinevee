@@ -1,0 +1,68 @@
+---
+import type { ContentItem } from "../../types/content";
+
+interface Props {
+  item: ContentItem;
+}
+
+const { item } = Astro.props;
+const detailHref = `/titulo/${item.type}/${item.id}`;
+const typeLabel = item.type === "movie" ? "Filme" : "Série";
+const rating = item.rating ? item.rating.toFixed(1) : null;
+---
+
+<a
+  href={detailHref}
+  class="cinevee-card group relative block w-[138px] shrink-0 rounded-xl focus-visible:outline-2 sm:w-[150px] lg:w-[168px] xl:w-[175px]"
+  aria-label={`${item.title}, ${typeLabel.toLowerCase()}${item.year ? ` de ${item.year}` : ""}`}
+>
+  <div class="cinevee-poster" style={`--ph: ${item.hue}`} aria-hidden="true">
+    <svg
+      aria-hidden="true"
+      class="absolute inset-0 m-auto h-10 w-10 text-white/25"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <path d="M12 2.5 14.3 9l6.7.1-5.4 4 2 6.5-5.6-3.9-5.6 3.9 2-6.5-5.4-4 6.7-.1L12 2.5Z" />
+    </svg>
+    {
+      item.posterUrl && (
+        <img
+          src={item.posterUrl}
+          alt={`Pôster de ${item.title}`}
+          width="500"
+          height="750"
+          loading="lazy"
+          class="absolute inset-0 h-full w-full object-cover"
+        />
+      )
+    }
+    <span
+      class="absolute left-2.5 top-2 rounded-full border border-white/15 bg-black/45 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm"
+    >
+      {typeLabel}
+    </span>
+  </div>
+  <div class="mt-2 px-0.5">
+    <p class="cinevee-card-title truncate text-sm font-medium leading-snug text-base-content group-hover:text-primary">
+      {item.title}
+    </p>
+    {
+      (item.year || rating) && (
+        <p class="mt-0.5 text-xs text-base-content/60">
+          {item.year && <span>{item.year}</span>}
+          {item.year && rating && (
+            <span aria-hidden="true"> · </span>
+          )}
+          {rating && (
+            <span>
+              <span aria-hidden="true">★ </span>
+              <span class="sr-only">Nota </span>
+              {rating}
+            </span>
+          )}
+        </p>
+      )
+    }
+  </div>
+</a>

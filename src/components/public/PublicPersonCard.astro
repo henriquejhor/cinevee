@@ -1,0 +1,74 @@
+---
+/**
+ * Card de pessoa para listas públicas (seguidores/seguindo).
+ * Somente identidade pública: avatar, nome, @username, bio curta e
+ * link "Ver perfil". Sem contadores, sem botão seguir (primeira versão).
+ * Texto escapado pelo Astro (nunca innerHTML).
+ */
+import type { PublicPerson } from "../../lib/publicProfile/service";
+
+interface Props {
+  person: PublicPerson;
+}
+
+const { person } = Astro.props;
+const name = person.displayName?.trim() || `@${person.username}`;
+// Nome acessível: texto puro sem tags (display_name é texto livre e pode
+// conter "<...>"; em atributo SSR isso serializaria bytes crus no HTML.
+// O conteúdo visível continua escapado pelo Astro; aqui só o rótulo muda.
+const accessibleName =
+  name.replace(/<[^>]*>/g, "").trim() || `@${person.username}`;
+
+function initials(value: string): string {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.charAt(0) ?? "";
+  const last = parts.length > 1 ? (parts[parts.length - 1]?.charAt(0) ?? "") : "";
+  return (first + last).toUpperCase() || "?";
+}
+---
+
+<li data-person-card data-key={`u:${person.username}`}>
+  <a
+    href={`/u/${person.username}`}
+    class="cinevee-card group flex min-h-12 items-center gap-3 rounded-2xl border border-base-300/60 bg-base-200/40 p-3 hover:border-base-300"
+    aria-label={`${accessibleName}, @${person.username}`}
+  >
+    {
+      person.avatarUrl ? (
+        <img
+          src={person.avatarUrl}
+          alt=""
+          width="160"
+          height="160"
+          loading="lazy"
+          aria-hidden="true"
+          class="h-16 w-16 shrink-0 rounded-full border border-white/10 object-cover sm:h-20 sm:w-20"
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-700 via-indigo-700 to-blue-800 text-lg font-extrabold text-white sm:h-20 sm:w-20"
+        >
+          {initials(name)}
+        </span>
+      )
+    }
+    <span class="min-w-0 flex-1 py-1">
+      <span class="block truncate font-semibold leading-snug group-hover:text-primary">
+        {name}
+      </span>
+      <span class="block truncate text-sm text-base-content/60">@{person.username}</span>
+      {
+        person.bio?.trim() && (
+          <span class="mt-0.5 line-clamp-2 block break-words text-sm leading-5 text-base-content/70">
+            {person.bio}
+          </span>
+        )
+      }
+    </span>
+    <span class="inline-flex min-h-12 shrink-0 items-center rounded-full px-4 text-sm font-semibold text-primary">
+      Ver perfil
+    </span>
+  </a>
+</li>
