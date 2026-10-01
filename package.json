@@ -20,6 +20,7 @@
     "verify:reviews": "node --env-file=.env scripts/verify-reviews.mjs",
     "verify:personalization": "node --env-file=.env scripts/verify-personalization.mjs",
     "verify:recommendation-actions": "node --env-file=.env scripts/verify-recommendation-actions.mjs",
+    "verify:replacement-frontend": "node scripts/verify-replacement-frontend.mjs",
     "verify:explore": "node --env-file=.env scripts/verify-explore.mjs",
     "verify:user-search": "node --env-file=.env scripts/verify-user-search.mjs",
     "verify:public-profiles": "node --env-file=.env scripts/verify-public-profiles.mjs",

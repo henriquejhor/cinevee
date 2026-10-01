@@ -371,7 +371,12 @@ export function startDiscoveryFlow(): void {
   function isValidRecommendation(value: unknown): boolean {
     if (typeof value !== "object" || value === null) return false;
     const rec = value as Record<string, unknown>;
-    if (typeof rec.reason !== "string" || typeof rec.rank !== "number") return false;
+    if (typeof rec.reason !== "string") return false;
+    // rank é opcional: /api/discovery/recommendations retorna rank (1–4),
+    // mas /api/discovery/replacement retorna { item, reason } sem rank
+    // (o slot já define a posição). Exigir rank aqui rejeitava um 200
+    // válido e caía em "Não foi possível buscar outra recomendação".
+    if (rec.rank !== undefined && typeof rec.rank !== "number") return false;
     const item = rec.item as Record<string, unknown> | undefined;
     return (
       !!item &&
