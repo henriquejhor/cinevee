@@ -14,6 +14,15 @@ export default defineConfig({
   adapter: node({
     mode: 'standalone',
   }),
+  security: {
+    checkOrigin: true,
+    allowedDomains: [
+      {
+        protocol: 'https',
+        hostname: 'cinevee.onrender.com',
+      },
+    ],
+  },
   vite: {
     plugins: [tailwindcss()]
   }
