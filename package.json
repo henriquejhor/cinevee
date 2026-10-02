@@ -33,6 +33,7 @@
     "verify:comment-replies": "node --env-file=.env scripts/verify-comment-replies.mjs",
     "verify:blocks": "node --env-file=.env scripts/verify-blocks.mjs",
     "verify:production": "node --env-file=.env scripts/verify-production.mjs",
+    "verify:google-auth": "node scripts/verify-google-auth.mjs",
     "verify:e2e": "node --env-file=.env scripts/verify-e2e.mjs",
     "astro": "astro"
   },

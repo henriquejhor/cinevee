@@ -96,14 +96,19 @@ async function getCurrentUserInner(
 /**
  * Nome de exibição: `user_metadata.display_name` (etapa fundação,
  * sem tabela profiles) com fallback para o e-mail.
+ * Contas Google não trazem `display_name` — caem em `full_name`/`name`
+ * do provider antes do e-mail (profile segue válido via trigger).
  */
 export function getDisplayName(
   user: Pick<User, "email" | "user_metadata"> | null | undefined,
 ): string {
   const meta = (user?.user_metadata ?? {}) as Record<string, unknown>;
-  const displayName =
-    typeof meta.display_name === "string" ? meta.display_name.trim() : "";
-  if (displayName.length > 0) return displayName;
+  for (const key of ["display_name", "full_name", "name"]) {
+    const value = meta[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
   return user?.email ?? "";
 }
 

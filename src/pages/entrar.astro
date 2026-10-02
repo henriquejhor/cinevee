@@ -6,6 +6,7 @@
 import "../styles/global.css";
 import Layout from "../layouts/Layout.astro";
 import AppHeader from "../components/navigation/AppHeader.astro";
+import GoogleSignIn from "../components/auth/GoogleSignIn.astro";
 import {
   createSupabaseServerClient,
   getCurrentUser,
@@ -28,6 +29,12 @@ const next = sanitizeNext(nextParam);
 
 let formError: string | null = null;
 let emailValue = "";
+
+// Retorno do OAuth sem code ou com troca falha (/auth/callback → ?error=oauth).
+const oauthError =
+  Astro.url.searchParams.get("error") === "oauth"
+    ? "Não foi possível entrar com o Google. Tente de novo."
+    : null;
 
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
@@ -74,12 +81,14 @@ if (Astro.request.method === "POST") {
     </p>
 
     {
-      formError && (
+      (formError ?? oauthError) && (
         <div role="alert" class="mt-6 rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm">
-          {formError}
+          {formError ?? oauthError}
         </div>
       )
     }
+
+    <GoogleSignIn next={next} />
 
     <form id="login-form" method="post" action="/entrar" class="mt-6 flex flex-col gap-4" novalidate>
       <input type="hidden" name="next" value={next} />
